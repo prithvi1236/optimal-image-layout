@@ -22,7 +22,7 @@ const ImageCanvas: React.FC = () => {
 
   const [file, setFile] = useState<File | null>(null);
   const [images, setImages] = useState<CanvasImage[]>([]);
-  const [pageCount, setPageCount] = useState(1);
+  const [pageCount, setPageCount] = useState(0);
   const [loadedImages, setLoadedImages] = useState<Record<string, HTMLImageElement>>({});
 
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
@@ -78,37 +78,47 @@ const ImageCanvas: React.FC = () => {
 };
 
   const uploadAndExtract = async () => {
-    if (!file) return;
+  if (!file) return;
 
-    const fd = new FormData();
-    fd.append("file", file);
+  const fd = new FormData();
+  fd.append("file", file);
 
-    const extract = await axios.post("http://localhost:5000/extract_img", fd);
-    const layout = await axios.post("http://localhost:5000/layout", {
-      image_ids: extract.data.image_ids,
-      margin: 40,
-      gap: 20,
-      default_scale: 0.5,
-    });
+  const extract = await axios.post("http://localhost:5000/extract_img", fd);
 
+  const layout = await axios.post("http://localhost:5000/layout", {
+    image_ids: extract.data.image_ids,
+    margin: 40,
+    gap: 20,
+    default_scale: 0.5,
+  });
+
+  setImages((prevImages) => {
+    const existingPages = pageCount;
     const newImages: CanvasImage[] = [];
+
     Object.entries(layout.data.layout).forEach(([page, items]: any) => {
       items.forEach((it: any) => {
         newImages.push({
-          id: it.image_id,
+          id: `${it.image_id}_${crypto.randomUUID()}`, // 🔥 safest unique ID
           url: it.url,
           x: it.x,
           y: it.y,
           width: it.width,
           height: it.height,
-          page: Number(page),
+          page: Number(page) + existingPages, // ✅ correct
         });
       });
     });
 
-    setImages(newImages);
-    setPageCount(Object.keys(layout.data.layout).length);
-  };
+    return [...prevImages, ...newImages];
+  });
+
+  setPageCount(
+    (prev) => prev + Object.keys(layout.data.layout).length
+  );
+};
+
+
 
   /* ---------------------------------- */
   /* Draw Canvas                        */
@@ -291,7 +301,12 @@ const getCursorForHandle = (handle: ResizeHandle) => {
   /* ---------------------------------- */
   return (
     <div>
-      <input type="file" onChange={(e) => e.target.files && setFile(e.target.files[0])} />
+      <input
+  type="file"
+  multiple
+  onChange={(e) => e.target.files && setFile(e.target.files[0])}
+/>
+
       <button onClick={uploadAndExtract} style={{ marginLeft: 10 }}>
         Generate Layout
       </button>
