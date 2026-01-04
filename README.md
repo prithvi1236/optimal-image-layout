@@ -2,7 +2,8 @@
 
 An intelligent image and PDF layout tool that automatically organizes your assets into perfectly formatted A4 sheets. Upload multiple images or PDFs, and let it handle the optimal arrangement with drag-and-drop editing capabilities.
 
-![Smart Layout Studio Landing Page]<img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/775d05a0-4afa-4c2b-b5ea-49a609711807" />
+## Smart Layout Studio Landing Page
+<img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/775d05a0-4afa-4c2b-b5ea-49a609711807" />
 
 ## ✨ Features
 
@@ -14,7 +15,7 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 - **Multi-Page Support**: Automatically creates additional pages when needed
 - **Responsive Design**: Modern, clean interface with zoom controls
 
-![Layout Interface] <img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/c354bdc4-c32a-473b-a816-d33aa2d19c0a" />
+## Layout Interface <img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/c354bdc4-c32a-473b-a816-d33aa2d19c0a" />
 
 ## 🚀 Quick Start
 
