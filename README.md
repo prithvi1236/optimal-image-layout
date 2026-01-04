@@ -73,6 +73,8 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ### Backend (Python/Flask)
 - **Flask**: Web framework with CORS support
+- **Flask-CORS**: Cross-origin support
+- **OpenCV(cv2)**: Image detection & figure extraction
 - **PyMuPDF (fitz)**: PDF processing and image extraction
 - **PIL (Pillow)**: Image manipulation and processing
 - **rectpack**: Advanced rectangle packing algorithms
