@@ -18,15 +18,32 @@ A4_WIDTH = 794
 A4_HEIGHT = 1123
 UPLOAD_BASE = "uploads"
 OUTPUT_BASE = "output"
-SERVER_URL = "http://localhost:5001"
 
+# Environment-based configuration
+PORT = int(os.environ.get("PORT", 5001))
+IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
+SERVER_URL = os.environ.get("SERVER_URL", f"http://localhost:{PORT}")
+
+# Ensure directories exist
 os.makedirs(UPLOAD_BASE, exist_ok=True)
 os.makedirs(OUTPUT_BASE, exist_ok=True)
 
 app = Flask(__name__)
 
-# Allow CORS for all domains to prevent frontend errors
-CORS(app, resources={r"/*": {"origins": "*"}})
+# CORS configuration for production
+if IS_PRODUCTION:
+    # In production, allow specific origins
+    CORS(app, resources={
+        r"/*": {
+            "origins": [
+                "https://smart-layout-frontend.onrender.com",
+                "https://*.onrender.com"
+            ]
+        }
+    })
+else:
+    # In development, allow all origins
+    CORS(app, resources={r"/*": {"origins": "*"}})
 
 # =========================
 # IN-MEMORY DATABASE (Session Aware)
@@ -112,7 +129,21 @@ threading.Thread(target=cleanup_old_sessions, daemon=True).start()
 
 @app.route("/")
 def home():
-    return "Smart Layout Backend (Multi-User) Running"
+    return jsonify({
+        "status": "running",
+        "service": "Smart Layout Backend",
+        "version": "2.0",
+        "environment": "production" if IS_PRODUCTION else "development"
+    })
+
+@app.route("/health")
+def health_check():
+    return jsonify({
+        "status": "healthy",
+        "timestamp": time.time(),
+        "sessions": len(images_db),
+        "uptime": "running"
+    })
 
 @app.route("/output/<session_id>/<filename>")
 def get_image(session_id, filename):
@@ -320,4 +351,4 @@ def create_layout():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="0.0.0.0", port=PORT, debug=not IS_PRODUCTION)

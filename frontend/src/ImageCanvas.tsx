@@ -25,7 +25,7 @@ type InteractionState = {
 
 const A4_WIDTH = 794;
 const A4_HEIGHT = 1123;
-const API_URL = "http://localhost:5001";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5001";
 const HANDLE_SIZE = 10;
 
 // ================= SESSION SETUP =================

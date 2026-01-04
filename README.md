@@ -25,7 +25,7 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 - **Node.js 18+** (for frontend)
 - **pip** and **npm/yarn**
 
-### Installation
+### Local Development
 
 1. **Clone the repository**
    ```bash
@@ -48,6 +48,25 @@ An intelligent image and PDF layout tool that automatically organizes your asset
    npm run dev
    ```
    Frontend will run on `http://localhost:5173`
+
+### Production Deployment
+
+Deploy to Render.com with one click using the included configuration:
+
+1. **Push to GitHub**
+   ```bash
+   git add .
+   git commit -m "Deploy to Render"
+   git push origin main
+   ```
+
+2. **Deploy on Render**
+   - Go to [Render Dashboard](https://dashboard.render.com)
+   - Click "New" → "Blueprint"
+   - Connect your GitHub repository
+   - Render will auto-deploy both frontend and backend
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ## 🛠️ Tech Stack
 
