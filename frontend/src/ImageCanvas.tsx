@@ -8,11 +8,11 @@ import {
   Loader2,
   ZoomIn,
   ZoomOut,
+  MousePointer2,
   Layers,
   RefreshCw,
   Plus,
   X,
-  LayoutTemplate,
 } from "lucide-react";
 
 // ================= TYPES =================
@@ -45,8 +45,15 @@ type InteractionState = {
 const A4_WIDTH = 794;
 const A4_HEIGHT = 1123;
 const API_URL = "http://localhost:5001";
+const MAX_CONTENT_WIDTH = A4_WIDTH - 80;   // margin * 2
+const MAX_CONTENT_HEIGHT = A4_HEIGHT - 80;
 const HANDLE_SIZE = 10;
 
+const getFitScale = (w: number, h: number) => {
+  const scaleW = MAX_CONTENT_WIDTH / w;
+  const scaleH = MAX_CONTENT_HEIGHT / h;
+  return Math.min(1, scaleW, scaleH); // never upscale
+};
 const ImageCanvasStudio: React.FC = () => {
   // ================= STATE =================
   const [assets, setAssets] = useState<AssetItem[]>([]);
@@ -109,47 +116,110 @@ const ImageCanvasStudio: React.FC = () => {
     }
   }, []);
 
-  // 2. DELETE IMAGE
+  // 2. DELETE IMAGE (Frontend + Backend)
   const handleDelete = async (idToDelete: string) => {
     if (!idToDelete) return;
+
+    // 1. Optimistic UI Update: Remove immediately
     const updatedAssets = assets.filter((a) => a.id !== idToDelete);
     setAssets(updatedAssets);
-    setSelectedId(null);
+    setSelectedId(null); // Deselect
+
+    // 2. Trigger Layout Reflow
     generateLayout(updatedAssets);
+
+    // 3. Call Backend to delete file
     try {
       await axios.post(`${API_URL}/delete_image`, { image_id: idToDelete });
-    } catch (err) {}
-  };
-
-  // 3. UPLOAD (MULTIPLE FILES)
-  const handleUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    setLoading(true);
-    try {
-      const fd = new FormData();
-      Array.from(files).forEach((file) => {
-        fd.append("files", file);
-      });
-
-      const res = await axios.post(`${API_URL}/extract_img`, fd);
-
-      const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
-        id: img.id,
-        url: `${API_URL}/output/${img.id}.png`,
-        scale: 1.0,
-        origW: img.width,
-        origH: img.height,
-      }));
-
-      const updated = [...assets, ...newAssets];
-      setAssets(updated);
-      await generateLayout(updated);
     } catch (err) {
-      console.error(err);
-      setLoading(false);
+      console.error("Failed to delete on server", err);
+      // Optional: Revert UI if server fails? Usually not needed for simple tools.
     }
   };
+
+  const MARGIN = 40;
+const GAP = 20;
+
+const getLastPageCursor = (page: number) => {
+  const items = layoutImages.filter(i => i.page === page);
+  let y = MARGIN;
+  items.forEach(img => {
+    y = Math.max(y, img.y + img.height + GAP);
+  });
+  return y;
+};
+
+
+  // 3. UPLOAD
+ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
+  setLoading(true);
+
+  try {
+    const fd = new FormData();
+    fd.append("file", uploadedFile);
+    if (extractFigures) fd.append("extract_figures", "1");
+
+    const res = await axios.post(`${API_URL}/extract_img`, fd);
+
+    const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
+      id: img.id,
+      url: `${API_URL}/output/${img.id}.png`,
+      scale: getFitScale(img.width, img.height),
+      origW: img.width,
+      origH: img.height,
+    }));
+
+    /* ============================
+       FIRST UPLOAD → FULL LAYOUT
+       ============================ */
+    if (assets.length === 0) {
+      const updated = [...newAssets];
+      setAssets(updated);
+      await generateLayout(updated);
+      return;
+    }
+
+    /* ============================
+       SUBSEQUENT UPLOAD → APPEND
+       ============================ */
+    let currentPage = pageCount;
+    let cursorY = getLastPageCursor(currentPage);
+
+    const appendedLayouts: LayoutItem[] = [];
+
+    newAssets.forEach((asset) => {
+      const scaledW = asset.origW * asset.scale;
+      const scaledH = asset.origH * asset.scale;
+
+      if (cursorY + scaledH > A4_HEIGHT - MARGIN) {
+        currentPage += 1;
+        cursorY = MARGIN;
+      }
+
+      appendedLayouts.push({
+        id: asset.id,
+        url: asset.url,
+        x: MARGIN,
+        y: cursorY,
+        width: scaledW,
+        height: scaledH,
+        page: currentPage,
+      });
+
+      cursorY += scaledH + GAP;
+    });
+
+    setAssets((prev) => [...prev, ...newAssets]);
+    setLayoutImages((prev) => [...prev, ...appendedLayouts]);
+    setPageCount((prev) => Math.max(prev, currentPage));
+  } catch (err) {
+    console.error(err);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   // 4. IMAGE LOADING
   useEffect(() => {
@@ -233,6 +303,7 @@ const ImageCanvasStudio: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pageItems = layoutImages.filter((img) => img.page === pageIndex);
 
+    // Render Loop
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -274,6 +345,7 @@ const ImageCanvasStudio: React.FC = () => {
       });
     }, [pageItems, loadedImages, selectedId]);
 
+    // Interaction Handlers
     const getMousePos = (e: React.MouseEvent) => {
       const rect = canvasRef.current!.getBoundingClientRect();
       return {
@@ -396,6 +468,7 @@ const ImageCanvasStudio: React.FC = () => {
       setInteraction(null);
     };
 
+    // 🔹 FIND SELECTED ITEM ON THIS PAGE TO RENDER OVERLAY
     const selectedItemOnPage = pageItems.find((i) => i.id === selectedId);
 
     return (
@@ -411,15 +484,18 @@ const ImageCanvasStudio: React.FC = () => {
           onMouseLeave={() => setInteraction(null)}
           className="block"
         />
+
+        {/* 🔹 DELETE OVERLAY: Renders HTML button on top of Canvas */}
         {selectedItemOnPage && (
           <div
             className="absolute flex items-center justify-center bg-red-500 text-white rounded-full w-6 h-6 shadow-md cursor-pointer hover:bg-red-600 hover:scale-110 transition-all z-10"
             style={{
-              left: selectedItemOnPage.x + selectedItemOnPage.width - 12,
+              // Position it at the top-right corner of the image
+              left: selectedItemOnPage.x + selectedItemOnPage.width - 12, // -12 to center on corner
               top: selectedItemOnPage.y - 12,
             }}
             onClick={(e) => {
-              e.stopPropagation();
+              e.stopPropagation(); // Prevent canvas click
               handleDelete(selectedItemOnPage.id);
             }}
             title="Delete Image"
@@ -435,110 +511,41 @@ const ImageCanvasStudio: React.FC = () => {
   return (
     <div className="flex h-screen w-full bg-zinc-100 text-zinc-900 font-sans overflow-hidden">
       {!hasContent ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-50/50 relative overflow-hidden">
-          {/* 1. DECORATIVE BACKGROUND GRID */}
-          <div className="absolute inset-0 z-0 opacity-[0.03] pointer-events-none">
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-            <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-indigo-500 opacity-20 blur-[100px]"></div>
-          </div>
-
-          {/* 2. MAIN CONTENT WRAPPER */}
-          <div className="relative z-10 max-w-2xl w-full flex flex-col items-center">
-            {/* 3. HERO TITLE SECTION */}
-            <div className="text-center mb-10 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-zinc-900">
-                Smart Layout{" "}
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-500">
-                  Studio
-                </span>
-              </h1>
-
-              <p className="text-zinc-500 text-lg max-w-md mx-auto leading-relaxed">
-                Drag, drop, and let AI organize your chaos. Turn scattered
-                images and PDFs into perfect A4 sheets in seconds.
-              </p>
+        <div className="flex-1 flex flex-col items-center justify-center p-8">
+          <h1 className="text-3xl font-black mb-6 text-zinc-800">
+            Smart Layout Studio
+          </h1>
+          <div className="border-2 border-dashed border-zinc-300 p-16 rounded-2xl hover:bg-white hover:border-indigo-400 cursor-pointer relative group transition-all">
+            <div className="flex flex-col items-center gap-4">
+              <Upload className="w-12 h-12 text-zinc-400 group-hover:text-indigo-500 transition-colors" />
+              <span className="text-zinc-500 font-medium">
+                Click to Upload Images or PDF
+              </span>
             </div>
-
-            {/* 4. CREATIVE UPLOAD CARD */}
-            <div className="relative group w-full max-w-md perspective-1000">
-              {/* Floating Decorative Elements (Abstract 'Files') */}
-              <div className="absolute -left-12 top-10 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 -rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:-translate-x-4 transition-all duration-500 delay-75"></div>
-              <div className="absolute -right-12 top-20 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:translate-x-4 transition-all duration-500 delay-100"></div>
-
-              {/* The Glow Effect */}
-              <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl blur opacity-20 group-hover:opacity-60 transition duration-500 group-hover:duration-200"></div>
-
-              {/* The Main Dropzone */}
-              <div className="relative bg-white/80 backdrop-blur-xl border border-zinc-200 p-12 rounded-xl shadow-2xl flex flex-col items-center text-center gap-6 transition-transform duration-300 group-hover:-translate-y-1">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-indigo-100 rounded-full scale-150 opacity-0 group-hover:scale-125 group-hover:opacity-100 transition-all duration-500"></div>
-                  <div className="relative bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 group-hover:border-indigo-100 transition-colors">
-                    <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-600 transition-colors duration-300" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <h3 className="text-xl font-bold text-zinc-800 group-hover:text-indigo-600 transition-colors">
-                    Drop your assets here
-                  </h3>
-                  <p className="text-sm font-medium text-zinc-400">
-                    or click to browse local files
-                  </p>
-                </div>
-
-                {/* Supported Formats Badge */}
-                <div className="flex gap-2 justify-center mt-2">
-                  {["JPG", "PNG", "PDF"].map((fmt) => (
-                    <span
-                      key={fmt}
-                      className="px-2 py-1 bg-zinc-50 border border-zinc-100 rounded text-[10px] font-bold text-zinc-400"
-                    >
-                      {fmt}
-                    </span>
-                  ))}
-                </div>
-
-                {/* The Actual Input */}
-                <input
-                  type="file"
-                  multiple
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
-                  onChange={(e) => handleUpload(e.target.files)}
-                />
-              </div>
-            </div>
+            <input
+              type="file"
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              onChange={(e) =>
+                e.target.files && handleUpload(e.target.files[0])
+              }
+            />
           </div>
         </div>
       ) : (
         <>
           {/* SIDEBAR */}
-          <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl">
-            {/* APP NAME HEADER */}
-            <div className="h-16 flex items-center px-5 border-b border-zinc-100 bg-white">
-              <div className="bg-indigo-600 p-1.5 rounded-lg mr-3 shadow-indigo-100 shadow-md">
-                <LayoutTemplate className="text-white w-5 h-5" />
-              </div>
-              <span className="font-bold text-lg text-zinc-800 tracking-tight">
-                Smart Layout Tool
-              </span>
-            </div>
-
-            {/* PAGES HEADER */}
-            <div className="flex items-center justify-between px-5 py-3 bg-zinc-50 border-b border-zinc-100">
-              <div className="flex items-center gap-2">
-                <Layers size={14} className="text-zinc-400" />
+          <aside className="w-60 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl">
+            <div className="h-14 flex items-center px-4 border-b border-zinc-100 bg-zinc-50/50 justify-between">
+              <div className="flex items-center">
+                <Layers size={16} className="text-indigo-600 mr-2" />
                 <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">
-                  Pages
+                  Pages ({pageCount})
                 </span>
               </div>
-              <span className="bg-zinc-200 text-zinc-700 px-2 py-0.5 rounded-md text-[10px] font-bold min-w-[24px] text-center">
-                {pageCount}
-              </span>
             </div>
 
-            {/* ADD MORE BUTTON */}
-            <div className="p-4 bg-white">
-              <div className="relative w-full flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-3 rounded-xl border border-indigo-200 transition-all cursor-pointer group shadow-sm">
+            <div className="p-4 border-b border-zinc-100 bg-white z-10">
+              <div className="relative w-full flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2.5 rounded-lg border border-indigo-200 transition-all cursor-pointer group">
                 <Plus
                   size={16}
                   className="group-hover:scale-110 transition-transform"
@@ -546,14 +553,27 @@ const ImageCanvasStudio: React.FC = () => {
                 <span className="text-xs font-bold">Add Images / PDF</span>
                 <input
                   type="file"
-                  multiple
                   className="absolute inset-0 opacity-0 cursor-pointer"
-                  onChange={(e) => handleUpload(e.target.files)}
+                  onChange={(e) =>
+                    e.target.files && handleUpload(e.target.files[0])
+                  }
                 />
               </div>
+              <div className="p-4 border-b border-zinc-100 bg-white z-10">
+  <div className="relative w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 py-2.5 rounded-lg border border-emerald-200 cursor-pointer transition-all">
+    Extract Figures from Photo
+    <input
+      type="file"
+      className="absolute inset-0 opacity-0 cursor-pointer"
+      onChange={(e) =>
+        e.target.files && handleUpload(e.target.files[0], true)
+      }
+    />
+  </div>
+</div>
+
             </div>
 
-            {/* THUMBNAILS LIST */}
             <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
               {Array.from({ length: pageCount }).map((_, idx) => (
                 <div
@@ -595,76 +615,67 @@ const ImageCanvasStudio: React.FC = () => {
 
           {/* MAIN AREA */}
           <main className="flex-1 flex flex-col bg-zinc-200/50 overflow-hidden relative">
-            <header className="h-16 bg-white border-b border-zinc-200 px-8 flex items-center justify-between z-10 shadow-sm">
-              {/* Status */}
-              <div className="flex items-center gap-3">
+            <header className="h-14 bg-white border-b border-zinc-200 px-6 flex items-center justify-between z-10 shadow-sm">
+              <div className="flex items-center gap-2">
                 {loading ? (
-                  <Loader2 size={18} className="animate-spin text-indigo-600" />
+                  <Loader2 size={16} className="animate-spin text-indigo-600" />
                 ) : (
-                  <RefreshCw size={18} className="text-indigo-600" />
+                  <RefreshCw size={16} className="text-indigo-600" />
                 )}
-                <div>
-                  <div className="text-xs font-bold text-zinc-900">
-                    {loading ? "Optimizing Layout..." : "Smart Reflow Active"}
-                  </div>
-                  <div className="text-[10px] text-zinc-400 font-medium">
-                    Auto-packing enabled
-                  </div>
-                </div>
+                <span className="text-xs font-bold text-zinc-500">
+                  {loading ? "Optimizing Layout..." : "Smart Reflow Active"}
+                </span>
               </div>
-
-              {/* Zoom */}
-              <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3 bg-zinc-100 rounded-full px-4 py-1.5 border border-zinc-200 shadow-inner">
+              <div className="flex items-center gap-3 bg-zinc-100 rounded-full px-4 py-1.5 border border-zinc-200">
                 <ZoomOut
-                  size={16}
+                  size={14}
                   onClick={() => setViewZoom((z) => Math.max(0.2, z - 0.1))}
-                  className="cursor-pointer text-zinc-500 hover:text-black transition-colors"
+                  className="cursor-pointer text-zinc-500 hover:text-black"
                 />
-                <span className="text-xs font-mono min-w-[36px] text-center font-bold text-zinc-700">
+                <span className="text-xs font-mono min-w-[32px] text-center">
                   {Math.round(viewZoom * 100)}%
                 </span>
                 <ZoomIn
-                  size={16}
+                  size={14}
                   onClick={() => setViewZoom((z) => Math.min(1.5, z + 0.1))}
-                  className="cursor-pointer text-zinc-500 hover:text-black transition-colors"
+                  className="cursor-pointer text-zinc-500 hover:text-black"
                 />
               </div>
-
-              {/* Actions */}
               <div className="flex gap-2">
                 <button
                   onClick={() => {
                     setAssets([]);
                     setPageCount(1);
                   }}
-                  className="p-2.5 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors border border-transparent hover:border-red-100"
+                  className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
                 >
                   <Trash2 size={18} />
                 </button>
                 <button
                   onClick={exportToPDF}
-                  className="bg-zinc-900 text-white px-5 py-2.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-lg shadow-zinc-200 active:scale-95 transition-all"
+                  className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-md"
                 >
-                  <Download size={16} /> Export PDF
+                  <Download size={14} /> Export
                 </button>
               </div>
             </header>
 
-            <div className="flex-1 overflow-auto p-12 flex flex-col items-center gap-10 scroll-smooth">
+            <div className="flex-1 overflow-auto p-12 flex flex-col items-center gap-8 scroll-smooth">
               {Array.from({ length: pageCount }).map((_, idx) => (
                 <div
                   key={idx}
                   id={`page-wrapper-${idx + 1}`}
-                  className="transition-transform origin-top duration-300"
+                  className="transition-transform origin-top"
                   style={{
                     transform: `scale(${viewZoom})`,
                     marginBottom: -((1 - viewZoom) * A4_HEIGHT),
                   }}
                 >
-                  <div className="bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.15)] relative rounded-sm overflow-hidden border border-zinc-100">
+                  <div className="bg-white shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] relative">
+                    {/* Page Canvas renders the delete overlay internally */}
                     <PageCanvas pageIndex={idx + 1} />
                   </div>
-                  <div className="text-center mt-4 text-[10px] font-black text-zinc-300 uppercase tracking-[0.2em] transform scale-[1/viewZoom]">
+                  <div className="text-center mt-3 text-[10px] font-bold text-zinc-300 uppercase tracking-widest transform scale-[1/viewZoom]">
                     A4 Sheet {idx + 1}
                   </div>
                 </div>
