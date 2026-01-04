@@ -3,12 +3,10 @@ import axios from "axios";
 import { jsPDF } from "jspdf";
 import { 
   Upload, Download, Trash2, Loader2, 
-  ZoomIn, ZoomOut, MousePointer2, Layers
+  ZoomIn, ZoomOut, MousePointer2, Layers, RefreshCw, Plus, X
 } from "lucide-react";
 
-// ==========================================
-// TYPES
-// ==========================================
+// ================= TYPES =================
 type LayoutItem = {
   id: string;
   url: string;
@@ -23,6 +21,8 @@ type AssetItem = {
   id: string;
   url: string;
   scale: number;
+  origW: number;
+  origH: number;
 };
 
 type InteractionState = {
@@ -36,11 +36,10 @@ type InteractionState = {
 const A4_WIDTH = 794;
 const A4_HEIGHT = 1123;
 const API_URL = "http://localhost:5001";
-const HANDLE_SIZE = 8;
+const HANDLE_SIZE = 10;
 
 const ImageCanvasStudio: React.FC = () => {
   // ================= STATE =================
-  const [file, setFile] = useState<File | null>(null);
   const [assets, setAssets] = useState<AssetItem[]>([]);
   const [layoutImages, setLayoutImages] = useState<LayoutItem[]>([]);
   const [pageCount, setPageCount] = useState(1);
@@ -51,13 +50,19 @@ const ImageCanvasStudio: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [interaction, setInteraction] = useState<InteractionState>(null);
   const [viewZoom, setViewZoom] = useState(0.6);
-  const [activePageIndex, setActivePageIndex] = useState(1); // Track visible page
+  const [activePageIndex, setActivePageIndex] = useState(1);
 
   const hasContent = assets.length > 0;
 
   // ================= API =================
+  
+  // 1. GENERATE LAYOUT
   const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
-    if (currentAssets.length === 0) return;
+    if (currentAssets.length === 0) {
+        setLayoutImages([]);
+        setPageCount(1);
+        return;
+    }
     setLoading(true);
     try {
       const payloadItems = currentAssets.map(a => ({ id: a.id, scale: a.scale }));
@@ -79,24 +84,50 @@ const ImageCanvasStudio: React.FC = () => {
     } catch (err) { console.error(err); } finally { setLoading(false); }
   }, []);
 
+  // 2. DELETE IMAGE (Frontend + Backend)
+  const handleDelete = async (idToDelete: string) => {
+      if(!idToDelete) return;
+      
+      // 1. Optimistic UI Update: Remove immediately
+      const updatedAssets = assets.filter(a => a.id !== idToDelete);
+      setAssets(updatedAssets);
+      setSelectedId(null); // Deselect
+      
+      // 2. Trigger Layout Reflow
+      generateLayout(updatedAssets);
+
+      // 3. Call Backend to delete file
+      try {
+          await axios.post(`${API_URL}/delete_image`, { image_id: idToDelete });
+      } catch (err) {
+          console.error("Failed to delete on server", err);
+          // Optional: Revert UI if server fails? Usually not needed for simple tools.
+      }
+  };
+
+  // 3. UPLOAD
   const handleUpload = async (uploadedFile: File) => {
     setLoading(true);
     try {
       const fd = new FormData();
       fd.append("file", uploadedFile);
       const res = await axios.post(`${API_URL}/extract_img`, fd);
-      const newAssets: AssetItem[] = res.data.image_ids.map((id: string) => ({
-        id, url: `${API_URL}/output/${id}.png`, scale: 1.0
+      
+      const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
+        id: img.id, 
+        url: `${API_URL}/output/${img.id}.png`, 
+        scale: 1.0,
+        origW: img.width,
+        origH: img.height
       }));
       
       const updated = [...assets, ...newAssets];
       setAssets(updated);
-      setFile(uploadedFile);
       await generateLayout(updated);
     } catch (err) { console.error(err); setLoading(false); }
   };
 
-  // ================= IMAGE LOADING =================
+  // 4. IMAGE LOADING
   useEffect(() => {
     if (layoutImages.length === 0) return;
     layoutImages.forEach((img) => {
@@ -105,11 +136,10 @@ const ImageCanvasStudio: React.FC = () => {
       im.crossOrigin = "anonymous";
       im.src = img.url;
       im.onload = () => setLoadedImages(prev => ({ ...prev, [img.id]: im }));
-      im.onerror = () => { im.src = img.url.replace(".png", ".jpg"); };
     });
   }, [layoutImages]);
 
-  // Update layout locally during drag/resize
+  // Update layout locally (visual only)
   const updateLocalLayout = (id: string, updates: Partial<LayoutItem>) => {
     setLayoutImages(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
   };
@@ -123,17 +153,11 @@ const ImageCanvasStudio: React.FC = () => {
         pdf.addImage(canvas.toDataURL("image/jpeg", 1.0), "JPEG", 0, 0, 210, 297);
       }
     }
-    pdf.save("layout.pdf");
+    pdf.save("smart_layout.pdf");
   };
 
-  // Scroll Helper
-  const scrollToPage = (pageNum: number) => {
-    setActivePageIndex(pageNum);
-    const el = document.getElementById(`page-wrapper-${pageNum}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+  // ================= SUB-COMPONENTS =================
 
-  // ================= COMPONENT: THUMBNAIL CANVAS =================
   const ThumbnailCanvas = ({ pageIndex }: { pageIndex: number }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pageItems = layoutImages.filter(img => img.page === pageIndex);
@@ -143,51 +167,28 @@ const ImageCanvasStudio: React.FC = () => {
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-
-      // Scale down (e.g., 0.15x)
-      const scale = 0.2; 
-      const w = A4_WIDTH * scale;
-      const h = A4_HEIGHT * scale;
-      
-      // Reset transform & clear
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      
-      // Apply scale
-      ctx.scale(scale, scale);
-      
-      // White background
+      const SCALE = 0.15;
+      ctx.clearRect(0, 0, A4_WIDTH * SCALE, A4_HEIGHT * SCALE);
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, A4_WIDTH, A4_HEIGHT);
-
-      // Draw Items
+      ctx.fillRect(0, 0, A4_WIDTH * SCALE, A4_HEIGHT * SCALE);
+      ctx.save();
+      ctx.scale(SCALE, SCALE);
       pageItems.forEach(img => {
         const im = loadedImages[img.id];
         if (im) ctx.drawImage(im, img.x, img.y, img.width, img.height);
+        else { ctx.fillStyle = "#e5e7eb"; ctx.fillRect(img.x, img.y, img.width, img.height); }
       });
-      
-      // Draw border around the page
-      ctx.strokeStyle = "#e5e7eb";
-      ctx.lineWidth = 2 / scale;
-      ctx.strokeRect(0, 0, A4_WIDTH, A4_HEIGHT);
-
+      ctx.restore();
     }, [pageItems, loadedImages]);
 
-    return (
-      <canvas
-        ref={canvasRef}
-        width={A4_WIDTH * 0.2}
-        height={A4_HEIGHT * 0.2}
-        className="block"
-      />
-    );
+    return <canvas ref={canvasRef} width={A4_WIDTH * 0.15} height={A4_HEIGHT * 0.15} className="block"/>;
   };
 
-  // ================= COMPONENT: MAIN CANVAS =================
   const PageCanvas = ({ pageIndex }: { pageIndex: number }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pageItems = layoutImages.filter(img => img.page === pageIndex);
 
+    // Render Loop
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -222,7 +223,7 @@ const ImageCanvasStudio: React.FC = () => {
       });
     }, [pageItems, loadedImages, selectedId]);
 
-    // Interaction handlers (MouseDown, MouseMove, MouseUp) same as before...
+    // Interaction Handlers
     const getMousePos = (e: React.MouseEvent) => {
       const rect = canvasRef.current!.getBoundingClientRect();
       return { x: (e.clientX - rect.left) / viewZoom, y: (e.clientY - rect.top) / viewZoom };
@@ -264,134 +265,157 @@ const ImageCanvasStudio: React.FC = () => {
 
     const handleMouseMove = (e: React.MouseEvent) => {
       const { x, y } = getMousePos(e);
-      if (interaction) {
-        const dx = x - interaction.startMouse.x;
-        const dy = y - interaction.startMouse.y;
-        const init = interaction.initialItem;
-
-        if (interaction.type === "move") {
-          updateLocalLayout(interaction.itemId, { x: init.x + dx, y: init.y + dy });
-        } else if (interaction.type === "resize") {
-            let newX = init.x, newY = init.y, newW = init.width, newH = init.height;
-            if (interaction.handle?.includes("e")) newW = Math.max(20, init.width + dx);
-            if (interaction.handle?.includes("s")) newH = Math.max(20, init.height + dy);
-            if (interaction.handle?.includes("w")) { newW = Math.max(20, init.width - dx); newX = init.x + dx; }
-            if (interaction.handle?.includes("n")) { newH = Math.max(20, init.height - dy); newY = init.y + dy; }
-            updateLocalLayout(interaction.itemId, { x: newX, y: newY, width: newW, height: newH });
-        }
-      }
-      
-      // Cursor Logic
       const hoverItem = pageItems.find(img => x >= img.x && x <= img.x + img.width && y >= img.y && y <= img.y + img.height);
       if (canvasRef.current) canvasRef.current.style.cursor = interaction ? (interaction.type === "move" ? "grabbing" : "nwse-resize") : (hoverItem ? "grab" : "default");
+
+      if (!interaction) return;
+      const dx = x - interaction.startMouse.x;
+      const dy = y - interaction.startMouse.y;
+      const init = interaction.initialItem;
+
+      if (interaction.type === "move") {
+        updateLocalLayout(interaction.itemId, { x: init.x + dx, y: init.y + dy });
+      } else if (interaction.type === "resize") {
+          let newW = init.width, newH = init.height;
+          if (interaction.handle?.includes("e")) newW = Math.max(50, init.width + dx);
+          if (interaction.handle?.includes("s")) newH = Math.max(50, init.height + dy);
+          const ratio = init.width / init.height;
+          if (interaction.handle?.includes("e")) newH = newW / ratio;
+          if (interaction.handle?.includes("s")) newW = newH * ratio;
+          updateLocalLayout(interaction.itemId, { width: newW, height: newH });
+      }
     };
 
+    const handleMouseUp = () => {
+      if (interaction?.type === "resize") {
+         const item = layoutImages.find(i => i.id === interaction.itemId);
+         const asset = assets.find(a => a.id === interaction.itemId);
+         if (item && asset) {
+            const newScale = item.width / asset.origW;
+            const updatedAssets = assets.map(a => a.id === asset.id ? { ...a, scale: newScale } : a);
+            setAssets(updatedAssets);
+            generateLayout(updatedAssets);
+         }
+      }
+      setInteraction(null);
+    };
+
+    // 🔹 FIND SELECTED ITEM ON THIS PAGE TO RENDER OVERLAY
+    const selectedItemOnPage = pageItems.find(i => i.id === selectedId);
+
     return (
-      <canvas
-        id={`canvas-page-${pageIndex}`}
-        ref={canvasRef}
-        width={A4_WIDTH}
-        height={A4_HEIGHT}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={() => setInteraction(null)}
-        onMouseLeave={() => setInteraction(null)}
-      />
+      <div className="relative w-full h-full">
+        <canvas
+          id={`canvas-page-${pageIndex}`}
+          ref={canvasRef}
+          width={A4_WIDTH}
+          height={A4_HEIGHT}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={() => setInteraction(null)}
+          className="block"
+        />
+        
+        {/* 🔹 DELETE OVERLAY: Renders HTML button on top of Canvas */}
+        {selectedItemOnPage && (
+            <div 
+                className="absolute flex items-center justify-center bg-red-500 text-white rounded-full w-6 h-6 shadow-md cursor-pointer hover:bg-red-600 hover:scale-110 transition-all z-10"
+                style={{
+                    // Position it at the top-right corner of the image
+                    left: selectedItemOnPage.x + selectedItemOnPage.width - 12, // -12 to center on corner
+                    top: selectedItemOnPage.y - 12
+                }}
+                onClick={(e) => {
+                    e.stopPropagation(); // Prevent canvas click
+                    handleDelete(selectedItemOnPage.id);
+                }}
+                title="Delete Image"
+            >
+                <X size={14} strokeWidth={3} />
+            </div>
+        )}
+      </div>
     );
   };
 
   // ================= UI RENDER =================
   return (
     <div className="flex h-screen w-full bg-zinc-100 text-zinc-900 font-sans overflow-hidden">
-      {!hasContent && (
+      {!hasContent ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8">
-            <h1 className="text-3xl font-black mb-6 text-zinc-800">LayoutStudio</h1>
-            <div className="border-2 border-dashed border-zinc-300 p-16 rounded-2xl hover:bg-white hover:border-indigo-400 cursor-pointer relative transition-all group">
+            <h1 className="text-3xl font-black mb-6 text-zinc-800">Smart Layout Studio</h1>
+            <div className="border-2 border-dashed border-zinc-300 p-16 rounded-2xl hover:bg-white hover:border-indigo-400 cursor-pointer relative group transition-all">
                <div className="flex flex-col items-center gap-4">
                  <Upload className="w-12 h-12 text-zinc-400 group-hover:text-indigo-500 transition-colors"/>
                  <span className="text-zinc-500 font-medium">Click to Upload Images or PDF</span>
                </div>
-               <input type="file" className="absolute inset-0 opacity-0" onChange={(e) => e.target.files && handleUpload(e.target.files[0])} />
+               <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => e.target.files && handleUpload(e.target.files[0])} />
             </div>
         </div>
-      )}
-
-      {hasContent && (
+      ) : (
         <>
-          {/* THUMBNAIL SIDEBAR */}
-          <aside className="w-56 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl">
-             <div className="h-14 flex items-center px-4 border-b border-zinc-100 bg-zinc-50/50">
-               <Layers size={16} className="text-indigo-600 mr-2"/>
-               <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Pages</span>
-               <span className="ml-auto bg-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded text-[10px] font-bold">{pageCount}</span>
+          {/* SIDEBAR */}
+          <aside className="w-60 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl">
+             <div className="h-14 flex items-center px-4 border-b border-zinc-100 bg-zinc-50/50 justify-between">
+               <div className="flex items-center">
+                   <Layers size={16} className="text-indigo-600 mr-2"/>
+                   <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Pages ({pageCount})</span>
+               </div>
              </div>
-             
-             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-               {Array.from({ length: pageCount }).map((_, idx) => {
-                 const pageNum = idx + 1;
-                 const isActive = activePageIndex === pageNum;
-                 return (
-                   <div 
-                     key={pageNum}
-                     onClick={() => scrollToPage(pageNum)}
-                     className={`group cursor-pointer flex flex-col items-center gap-2 transition-all duration-200 ${isActive ? 'scale-105' : 'opacity-70 hover:opacity-100'}`}
-                   >
-                     <div className={`relative rounded-md overflow-hidden border-2 shadow-sm transition-colors ${isActive ? 'border-indigo-600 ring-2 ring-indigo-100' : 'border-zinc-200 group-hover:border-indigo-300'}`}>
-                        <ThumbnailCanvas pageIndex={pageNum} />
-                     </div>
-                     <span className={`text-[10px] font-bold ${isActive ? 'text-indigo-600' : 'text-zinc-400'}`}>
-                       Page {pageNum}
-                     </span>
-                   </div>
-                 );
-               })}
-             </div>
-             
-             {/* Mini Upload Button at bottom of sidebar */}
-             <div className="p-4 border-t border-zinc-100">
-                <div className="relative flex items-center justify-center gap-2 p-3 border border-dashed border-zinc-300 rounded-lg hover:bg-zinc-50 cursor-pointer text-zinc-500 hover:text-indigo-600 transition-colors">
-                  <Upload size={14} />
-                  <span className="text-xs font-bold">Add Pages</span>
-                  <input type="file" className="absolute inset-0 opacity-0" onChange={(e) => e.target.files && handleUpload(e.target.files[0])} />
+
+             <div className="p-4 border-b border-zinc-100 bg-white z-10">
+                <div className="relative w-full flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2.5 rounded-lg border border-indigo-200 transition-all cursor-pointer group">
+                   <Plus size={16} className="group-hover:scale-110 transition-transform"/>
+                   <span className="text-xs font-bold">Add Images / PDF</span>
+                   <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => e.target.files && handleUpload(e.target.files[0])} />
                 </div>
+             </div>
+
+             <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
+               {Array.from({ length: pageCount }).map((_, idx) => (
+                 <div key={idx} onClick={() => { setActivePageIndex(idx+1); document.getElementById(`page-wrapper-${idx+1}`)?.scrollIntoView({behavior:'smooth'}); }} 
+                      className={`group cursor-pointer flex flex-col items-center gap-2 transition-opacity duration-200 ${activePageIndex === idx+1 ? 'opacity-100' : 'opacity-60 hover:opacity-100'}`}>
+                     <div className={`relative border-2 rounded bg-white overflow-hidden shadow-sm transition-all ${activePageIndex === idx+1 ? 'border-indigo-600 ring-2 ring-indigo-50 scale-105' : 'border-zinc-200 group-hover:border-indigo-300'}`}>
+                        <ThumbnailCanvas pageIndex={idx + 1} />
+                     </div>
+                     <span className={`text-[10px] font-bold ${activePageIndex === idx+1 ? 'text-indigo-600' : 'text-zinc-400'}`}>
+                        Page {idx+1}
+                     </span>
+                 </div>
+               ))}
              </div>
           </aside>
 
-          {/* MAIN CANVAS AREA */}
+          {/* MAIN AREA */}
           <main className="flex-1 flex flex-col bg-zinc-200/50 overflow-hidden relative">
              <header className="h-14 bg-white border-b border-zinc-200 px-6 flex items-center justify-between z-10 shadow-sm">
                 <div className="flex items-center gap-2">
-                   <MousePointer2 size={16} className="text-indigo-600" />
-                   <span className="text-xs font-bold text-zinc-500">Interactive Mode</span>
+                   {loading ? <Loader2 size={16} className="animate-spin text-indigo-600"/> : <RefreshCw size={16} className="text-indigo-600"/>}
+                   <span className="text-xs font-bold text-zinc-500">{loading ? "Optimizing Layout..." : "Smart Reflow Active"}</span>
                 </div>
                 <div className="flex items-center gap-3 bg-zinc-100 rounded-full px-4 py-1.5 border border-zinc-200">
-                    <ZoomOut size={14} onClick={() => setViewZoom(z => Math.max(0.2, z-0.1))} className="cursor-pointer text-zinc-500 hover:text-zinc-900"/>
-                    <span className="text-[10px] font-black min-w-[30px] text-center">{Math.round(viewZoom*100)}%</span>
-                    <ZoomIn size={14} onClick={() => setViewZoom(z => Math.min(1.5, z+0.1))} className="cursor-pointer text-zinc-500 hover:text-zinc-900"/>
+                    <ZoomOut size={14} onClick={() => setViewZoom(z => Math.max(0.2, z-0.1))} className="cursor-pointer text-zinc-500 hover:text-black"/>
+                    <span className="text-xs font-mono min-w-[32px] text-center">{Math.round(viewZoom*100)}%</span>
+                    <ZoomIn size={14} onClick={() => setViewZoom(z => Math.min(1.5, z+0.1))} className="cursor-pointer text-zinc-500 hover:text-black"/>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { setAssets([]); setPageCount(1); }} className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                     <Trash2 size={18} />
-                  </button>
-                  <button onClick={exportToPDF} className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 transition-colors shadow-lg shadow-zinc-200">
-                     <Download size={14}/> Export PDF
-                  </button>
+                    <button onClick={() => { setAssets([]); setPageCount(1); }} className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={18}/></button>
+                    <button onClick={exportToPDF} className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-md">
+                    <Download size={14}/> Export
+                    </button>
                 </div>
              </header>
 
              <div className="flex-1 overflow-auto p-12 flex flex-col items-center gap-8 scroll-smooth">
                 {Array.from({ length: pageCount }).map((_, idx) => (
-                   <div 
-                      key={idx} 
-                      id={`page-wrapper-${idx + 1}`}
-                      className="transition-transform duration-200 origin-top"
-                      style={{ transform: `scale(${viewZoom})`, width: A4_WIDTH, height: A4_HEIGHT, marginBottom: -((1-viewZoom)*A4_HEIGHT) }}
-                   >
-                      <div className="bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)]">
+                   <div key={idx} id={`page-wrapper-${idx+1}`} className="transition-transform origin-top" style={{ transform: `scale(${viewZoom})`, marginBottom: -((1-viewZoom)*A4_HEIGHT) }}>
+                      <div className="bg-white shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] relative">
+                        {/* Page Canvas renders the delete overlay internally */}
                         <PageCanvas pageIndex={idx + 1} />
                       </div>
-                      <div className="text-center mt-4 opacity-50 text-xs font-bold uppercase tracking-widest pointer-events-none transform scale-[1/viewZoom]">
-                        Page {idx + 1}
+                      <div className="text-center mt-3 text-[10px] font-bold text-zinc-300 uppercase tracking-widest transform scale-[1/viewZoom]">
+                         A4 Sheet {idx+1}
                       </div>
                    </div>
                 ))}
