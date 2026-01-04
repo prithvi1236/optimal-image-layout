@@ -21,7 +21,8 @@ const ImageCanvasStudio: React.FC = () => {
   
   const [file, setFile] = useState<File | null>(null);
   const [images, setImages] = useState<CanvasImage[]>([]);
-  const [pageCount, setPageCount] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
+  const [loading, setLoading] = useState(false);
   const [loadedImages, setLoadedImages] = useState<Record<string, HTMLImageElement>>({});
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(0.7);
