@@ -3,7 +3,7 @@
 An intelligent image and PDF layout tool that automatically organizes your assets into perfectly formatted A4 sheets. Upload multiple images or PDFs, and let it handle the optimal arrangement with drag-and-drop editing capabilities.
 
 ## Landing Page
-![Image](https://github.com/user-attachments/assets/f706e46f-07e4-46a0-b820-e522fcec40bc)
+<img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/775d05a0-4afa-4c2b-b5ea-49a609711807" />
 
 ## ✨ Features
 
