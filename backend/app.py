@@ -6,12 +6,12 @@ import traceback
 from PIL import Image
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from rectpack import newPacker
+from rectpack import newPacker, PackingMode, MaxRectsBssf
 
 # =========================
-# # CONFIG
+# CONFIG
 # =========================
-A4_WIDTH = 794    # px (96 DPI)
+A4_WIDTH = 794     # px @ 96 DPI
 A4_HEIGHT = 1123
 
 UPLOAD_FOLDER = "uploads"
@@ -24,12 +24,12 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # APP SETUP
 # =========================
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # =========================
 # IN-MEMORY IMAGE DB
 # =========================
-images_db = {}  # image_id -> {path, width, height}
+images_db = {}  # image_id -> {path, width, height, ext}
 
 # =========================
 # HELPERS
@@ -43,10 +43,11 @@ def extract_images_from_pdf(pdf_path):
             xref = img[0]
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
+            ext = base_image["ext"]
 
             image = Image.open(io.BytesIO(image_bytes))
             img_id = str(uuid.uuid4())
-            img_name = f"{img_id}.png"
+            img_name = f"{img_id}.{ext}"
             img_path = os.path.join(OUTPUT_FOLDER, img_name)
 
             image.save(img_path)
@@ -54,7 +55,8 @@ def extract_images_from_pdf(pdf_path):
             images_db[img_id] = {
                 "path": img_path,
                 "width": image.width,
-                "height": image.height
+                "height": image.height,
+                "ext": ext
             }
 
             saved_ids.append(img_id)
@@ -62,19 +64,16 @@ def extract_images_from_pdf(pdf_path):
     doc.close()
     return saved_ids
 
-
 # =========================
 # ROUTES
 # =========================
 @app.route("/")
 def home():
-    return "PDF Image Extraction Backend Running"
-
+    return "Image Layout Backend (MaxRects)"
 
 @app.route("/output/<filename>")
 def get_image(filename):
     return send_from_directory(OUTPUT_FOLDER, filename)
-
 
 @app.route("/extract_img", methods=["POST"])
 def extract_img():
@@ -97,31 +96,32 @@ def extract_img():
             image_ids = extract_images_from_pdf(temp_path)
 
         elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"]:
-            img = Image.open(temp_path)
+            image = Image.open(temp_path)
             img_id = str(uuid.uuid4())
             img_name = f"{img_id}{ext}"
             img_path = os.path.join(OUTPUT_FOLDER, img_name)
-            img.save(img_path)
+            image.save(img_path)
 
             images_db[img_id] = {
                 "path": img_path,
-                "width": img.width,
-                "height": img.height
+                "width": image.width,
+                "height": image.height,
+                "ext": ext[1:]
             }
+
             image_ids.append(img_id)
 
         else:
             return jsonify({"error": "Unsupported file type"}), 400
 
         return jsonify({
-            "message": "Processed successfully",
+            "message": "Images extracted",
             "image_ids": image_ids
         })
 
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
 
 # =========================
 # LAYOUT API
@@ -132,9 +132,9 @@ def create_layout():
         data = request.get_json()
 
         image_ids = data.get("image_ids", [])
-        margin = data.get("margin", 50)
-        scale = data.get("default_scale", 0.5)
+        margin = data.get("margin", 40)
         gap = data.get("gap", 20)
+        scale = data.get("default_scale", 0.5)
 
         if not image_ids:
             return jsonify({"error": "No images provided"}), 400
@@ -144,12 +144,12 @@ def create_layout():
         for img_id in image_ids:
             img = images_db.get(img_id)
             if not img:
-                return jsonify({"error": f"Image {img_id} not found"}), 404
+                continue
 
             w = int(img["width"] * scale)
             h = int(img["height"] * scale)
 
-            rectangles.append((w + gap, h + gap, img_id, w, h))
+            rectangles.append((img_id, w, h))
 
         layout = pack_rectangles(
             rectangles,
@@ -167,36 +167,38 @@ def create_layout():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
 # =========================
-# PACKING LOGIC
+# MAXRECTS PACKING (CORE)
 # =========================
 def pack_rectangles(rectangles, bin_w, bin_h, gap):
-    packer = newPacker(rotation=False)
+    rectangles.sort(key=lambda r: r[1] * r[2], reverse=True)
 
-    for _ in range(10):  # max 10 A4 pages
+    packer = newPacker(
+        mode=PackingMode.Offline,
+        pack_algo=MaxRectsBssf,
+        rotation=False
+    )
+
+    for _ in range(len(rectangles)):
         packer.add_bin(bin_w, bin_h)
 
-    for w_gap, h_gap, rid, w, h in rectangles:
-        packer.add_rect(w_gap, h_gap, rid)
+    for img_id, w, h in rectangles:
+        packer.add_rect(w, h, img_id)
 
     packer.pack()
 
     layout = {}
 
-    for bin_id, x, y, w_gap, h_gap, rid in packer.rect_list():
-        for r in rectangles:
-            if r[2] == rid:
-                orig_w, orig_h = r[3], r[4]
-                break
+    for bin_id, x, y, w, h, img_id in packer.rect_list():
+        img = images_db[img_id]
 
-        layout.setdefault(bin_id, []).append({
-            "image_id": rid,
+        layout.setdefault(bin_id + 1, []).append({
+            "image_id": img_id,
             "x": x + gap // 2,
             "y": y + gap // 2,
-            "width": orig_w,
-            "height": orig_h,
-            "url": f"http://localhost:5000/output/{rid}.png"
+            "width": w - gap,
+            "height": h - gap,
+            "url": f"http://localhost:5000/output/{img_id}.{img['ext']}"
         })
 
     return layout
