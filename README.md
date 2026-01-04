@@ -7,7 +7,7 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 
 ## ✨ Features
 
-- **Smart Auto-Layout**: AI-powered rectangle packing algorithm optimizes space usage
+- **Smart Auto-Layout**: Utilizes the RectPack algorithm to intelligently pack items and maximize space efficiency.
 - **Multi-Format Support**: Upload JPG, PNG, PDF files simultaneously
 - **Interactive Editing**: Drag, resize, and reposition images with visual handles
 - **Real-time Preview**: See changes instantly with live canvas rendering
