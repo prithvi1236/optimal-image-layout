@@ -1,133 +1,88 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from PIL import Image, ImageDraw
 import os
+import io
 import uuid
-
-from rectpack import newPacker
+import fitz                 # PyMuPDF
+from PIL import Image
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-CORS(app)  # IMPORTANT for localhost:5173 → localhost:5000
 
-UPLOAD_DIR = "uploads"
-PREVIEW_DIR = "previews"
+UPLOAD_FOLDER = "uploads"
+OUTPUT_FOLDER = "output"
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(PREVIEW_DIR, exist_ok=True)
-
-# A4 size at 300 DPI
-A4_WIDTH = 2480
-A4_HEIGHT = 3508
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
-# -----------------------------
-# Upload image
-# -----------------------------
-@app.route("/upload", methods=["POST"])
-def upload():
-    file = request.files.get("file")
-    if not file:
-        return jsonify({"error": "No file"}), 400
+def extract_images_from_pdf(pdf_path):
+    """
+    Extract all images from a PDF and save them as image files
+    """
+    saved_images = []
+    doc = fitz.open(pdf_path)
 
-    img_id = str(uuid.uuid4())
-    ext = file.filename.split(".")[-1].lower()
-    path = os.path.join(UPLOAD_DIR, f"{img_id}.{ext}")
-    file.save(path)
+    for page_num in range(doc.page_count):
+        page = doc.load_page(page_num)
+        images = page.get_images(full=True)
 
-    img = Image.open(path)
+        for img in images:
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
 
-    return jsonify({
-        "id": img_id,
-        "path": path,
-        "width": img.width,
-        "height": img.height,
-        "ext": ext
-    })
+            image = Image.open(io.BytesIO(image_bytes))
+            img_name = f"{uuid.uuid4()}.png"
+            img_path = os.path.join(OUTPUT_FOLDER, img_name)
+
+            image.save(img_path)
+            saved_images.append(img_path)
+
+    doc.close()
+    return saved_images
 
 
-# -----------------------------
-# Auto layout images on A4
-# -----------------------------
-@app.route("/layout", methods=["POST"])
-def layout():
-    images = request.json.get("images", [])
+@app.route("/")
+def home():
+    return "PDF Image Extraction Backend Running"
 
-    if not images:
-        return jsonify({"pages": 0, "previews": []})
 
-    packer = newPacker(rotation=False)
+@app.route("/extract_img", methods=["POST"])
+def extract_img():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-    # Add ONE A4 page initially
-    packer.add_bin(A4_WIDTH, A4_HEIGHT)
+    file = request.files["file"]
+    
+    if file.filename == "":
+        return jsonify({"error": "Empty filename"}), 400
 
-    # ---- SCALE IMAGES TO FIT A4 ----
-    for img in images:
-        w = img["width"]
-        h = img["height"]
+    filename = file.filename
+    file_ext = os.path.splitext(filename)[1].lower()  # Get extension
 
-        scale = min(A4_WIDTH / w, A4_HEIGHT / h, 1.0)
+    # Save file temporarily
+    temp_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(temp_path)
 
-        packed_w = int(w * scale)
-        packed_h = int(h * scale)
+    saved_images = []
 
-        img["packed_w"] = packed_w
-        img["packed_h"] = packed_h
-
-        packer.add_rect(packed_w, packed_h, rid=img["id"])
-
-    packer.pack()
-
-    previews = []
-    page_count = 0
-
-    for bin_index, abin in enumerate(packer):
-        if not abin:
-            continue
-
-        page_count += 1
-
-        # Create white A4 canvas
-        page = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), "white")
-        draw = ImageDraw.Draw(page)
-
-        for rect in abin:
-            x, y, w, h, rid = rect
-
-            # Find image
-            img_data = next(i for i in images if i["id"] == rid)
-            img = Image.open(img_data["path"])
-
-            img = img.resize((w, h))
-            page.paste(img, (x, y))
-
-            # Optional border (helps debugging)
-            draw.rectangle(
-                [x, y, x + w, y + h],
-                outline="black",
-                width=2
-            )
-
-        preview_name = f"preview_{bin_index}.png"
-        preview_path = os.path.join(PREVIEW_DIR, preview_name)
-        page.save(preview_path)
-
-        previews.append({
-            "page": bin_index + 1,
-            "preview": preview_name
-        })
+    if file_ext == ".pdf":
+        # Extract images from PDF
+        saved_images = extract_images_from_pdf(temp_path)
+    elif file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"]:
+        # It's an image, just save to output folder
+        img_name = f"{uuid.uuid4()}{file_ext}"
+        img_path = os.path.join(OUTPUT_FOLDER, img_name)
+        image = Image.open(temp_path)
+        image.save(img_path)
+        saved_images.append(img_path)
+    else:
+        return jsonify({"error": "Unsupported file type"}), 400
 
     return jsonify({
-        "pages": page_count,
-        "previews": previews
+        "message": "File processed successfully",
+        "count": len(saved_images),
+        "images": saved_images
     })
-
-
-# -----------------------------
-# Serve preview images
-# -----------------------------
-@app.route("/preview/<name>")
-def preview(name):
-    return app.send_static_file(f"../{PREVIEW_DIR}/{name}")
 
 
 if __name__ == "__main__":
