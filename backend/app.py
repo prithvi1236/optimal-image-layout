@@ -132,33 +132,51 @@ def extract_img():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# ... (Imports and Config remain the same) ...
+
 # =========================
-# LAYOUT API
+# LAYOUT API (UPDATED)
 # =========================
 @app.route("/layout", methods=["POST"])
 def create_layout():
     try:
         data = request.get_json()
 
-        image_ids = data.get("image_ids", [])
+        # EXPECTED INPUT:
+        # {
+        #   "items": [
+        #      {"id": "uuid-1", "scale": 1.0}, 
+        #      {"id": "uuid-2", "scale": 0.8}
+        #   ],
+        #   "margin": 40,
+        #   "gap": 20
+        # }
+        
+        items = data.get("items", []) # Ordered list from frontend
         margin = data.get("margin", 40)
         gap = data.get("gap", 20)
-        scale = data.get("default_scale", 0.5)
 
         if not image_ids:
             return jsonify({"error": "No images provided"}), 400
 
         rectangles = []
 
-        for img_id in image_ids:
+        # Process items in the order received (Priority Order)
+        for item in items:
+            img_id = item.get("id")
+            scale = item.get("scale", 1.0) # Default to 1.0 if not sent
+            
             img = images_db.get(img_id)
             if not img:
                 continue
 
-            w = int(img["width"] * scale)
-            h = int(img["height"] * scale)
-
-            rectangles.append((img_id, w, h))
+            # Calculate scaled dimensions + gap
+            w = int(img["width"] * scale) + gap
+            h = int(img["height"] * scale) + gap
+            
+            # Store tuple: (width, height, image_id)
+            # We put img_id last because rectpack expects (w, h, rid)
+            rectangles.append((w, h, img_id))
 
         layout = pack_rectangles(
             rectangles,
@@ -177,36 +195,67 @@ def create_layout():
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# MAXRECTS PACKING (CORE)
+# MAXRECTS PACKING (UPDATED)
 # =========================
-def pack_rectangles(rectangles, bin_w, bin_h, gap):
-    rectangles.sort(key=lambda r: r[1] * r[2], reverse=True)
+def pack_rectangles(rectangles, bin_w, bin_h, margin, gap):
+    # ❌ REMOVED SORTING: rectangles.sort(key=lambda r: r[1] * r[2], reverse=True)
+    # We now trust the order sent by the Frontend for priority.
 
+    # Initialize Packer
     packer = newPacker(
-        mode=PackingMode.Offline,
+        mode=PackingMode.Offline, # Offline tries to pack tighter
         pack_algo=MaxRectsBssf,
         rotation=False
     )
 
-    for _ in range(len(rectangles)):
-        packer.add_bin(bin_w, bin_h)
+    # --- STRATEGY: Dynamic Bin Allocation ---
+    
+    # 1. Add the first bin (Page 1)
+    packer.add_bin(bin_w, bin_h)
 
-    for img_id, w, h in rectangles:
+    # 2. Add rectangles in user-defined order
+    for w, h, img_id in rectangles:
         packer.add_rect(w, h, img_id)
 
+    # 3. Pack
     packer.pack()
+
+    # 4. Check if items didn't fit (unpacked list)
+    # If items are missing, add more bins (pages) and retry ONLY the missing ones?
+    # Actually, rectpack is simpler: Add enough bins to cover worst case.
+    
+    if len(packer.rect_list()) < len(rectangles):
+        # Reset and try again with ample bins
+        packer = newPacker(
+            mode=PackingMode.Offline, 
+            pack_algo=MaxRectsBssf, 
+            rotation=False
+        )
+        
+        # Add enough pages (worst case: 1 page per image)
+        for _ in range(len(rectangles)):
+            packer.add_bin(bin_w, bin_h)
+            
+        for w, h, img_id in rectangles:
+            packer.add_rect(w, h, img_id)
+            
+        packer.pack()
 
     layout = {}
 
     for bin_id, x, y, w, h, img_id in packer.rect_list():
         img = images_db[img_id]
-
+        
+        # Calculate actual rendered width (removing the gap padding we added)
+        actual_width = w - gap
+        actual_height = h - gap
+        
         layout.setdefault(bin_id + 1, []).append({
             "image_id": img_id,
-            "x": x + gap // 2,
-            "y": y + gap // 2,
-            "width": w - gap,
-            "height": h - gap,
+            "x": x + margin,
+            "y": y + margin,
+            "width": actual_width,
+            "height": actual_height,
             "url": f"http://localhost:5001/output/{img_id}.{img['ext']}"
         })
 
