@@ -103,30 +103,23 @@ def extract_img():
 
         if ext == ".pdf":
             image_ids = extract_images_from_pdf(temp_path)
+            # You might need to adjust extract_images_from_pdf to return dicts with w/h too
+            # For simplicity, let's assume we fetch them from DB below
 
-        elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"]:
-            image = Image.open(temp_path)
-            img_id = str(uuid.uuid4())
-            img_name = f"{img_id}{ext}"
-            img_path = os.path.join(OUTPUT_FOLDER, img_name)
-            image.save(img_path)
+        # ... existing logic ...
 
-            images_db[img_id] = {
-                "path": img_path,
-                "width": image.width,
-                "height": image.height,
-                "ext": ext[1:]
-            }
+        # 👇 UPDATED RESPONSE CONSTRUCTION
+        response_data = []
+        for i_id in image_ids:
+             # Retrieve details we just saved
+             img_data = images_db[i_id] 
+             response_data.append({
+                 "id": i_id,
+                 "width": img_data["width"],
+                 "height": img_data["height"]
+             })
 
-            image_ids.append(img_id)
-
-        else:
-            return jsonify({"error": "Unsupported file type"}), 400
-
-        return jsonify({
-            "message": "Images extracted",
-            "image_ids": image_ids
-        })
+        return jsonify({"images": response_data})
 
     except Exception as e:
         traceback.print_exc()
@@ -261,7 +254,42 @@ def pack_rectangles(rectangles, bin_w, bin_h, margin, gap):
 
     return layout
 
+# ... existing imports ...
 
+# =========================
+# DELETE API
+# =========================
+@app.route("/delete_image", methods=["POST"])
+def delete_image():
+    try:
+        data = request.get_json()
+        img_id = data.get("image_id")
+
+        if not img_id:
+            return jsonify({"error": "Missing image_id"}), 400
+            
+        if img_id not in images_db:
+            # Even if not in DB, try to delete file if it exists (cleanup)
+            # But normally we return 404. For robustness, let's just say success.
+            return jsonify({"message": "Image not found, assuming deleted"}), 200
+
+        # Get file info
+        img_data = images_db[img_id]
+        file_path = img_data["path"]
+
+        # 1. Remove from Disk
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        # 2. Remove from DB
+        del images_db[img_id]
+
+        return jsonify({"message": "Deleted successfully", "id": img_id})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+        
 # =========================
 # RUN
 # =========================
