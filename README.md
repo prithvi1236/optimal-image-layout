@@ -78,6 +78,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 - **PyMuPDF (fitz)**: PDF processing and image extraction
 - **PIL (Pillow)**: Image manipulation and processing
 - **rectpack**: Advanced rectangle packing algorithms
+- **threading**: Background cleanup and non-blocking tasks
 - **UUID**: Unique identifier generation
 
 ### Frontend (React/TypeScript)
