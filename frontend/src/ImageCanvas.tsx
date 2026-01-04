@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import axios from "axios";
 
-
 type CanvasImage = {
   id: string;
   url: string;
@@ -12,149 +11,189 @@ type CanvasImage = {
   page: number;
 };
 
+const A4_WIDTH = 794;
+const A4_HEIGHT = 1123;
+const HANDLE_SIZE = 8;
+
+type ResizeHandle = "nw" | "ne" | "sw" | "se" | null;
+
 const ImageCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const [file, setFile] = useState<File | null>(null);
   const [images, setImages] = useState<CanvasImage[]>([]);
-  const [pageCount, setPageCount] = useState<number>(1);
-  const [loadedImages, setLoadedImages] = useState<{ [id: string]: HTMLImageElement }>({});
-
-  useEffect(() => {
-  const newLoadedImages: { [id: string]: HTMLImageElement } = {};
-  images.forEach((img) => {
-    const image = new Image();
-    image.src = img.url;
-    newLoadedImages[img.id] = image;
-  });
-  setLoadedImages(newLoadedImages);
-}, [images]);
-
+  const [pageCount, setPageCount] = useState(1);
+  const [loadedImages, setLoadedImages] = useState<Record<string, HTMLImageElement>>({});
 
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [resizeHandle, setResizeHandle] = useState<ResizeHandle>(null);
 
-  /* 🔹 Upload & extract */
-  const uploadAndExtract = async (): Promise<void> => {
+  /* ---------------------------------- */
+  /* Load images once                   */
+  /* ---------------------------------- */
+  useEffect(() => {
+    const map: Record<string, HTMLImageElement> = {};
+    images.forEach((img) => {
+      const im = new Image();
+      im.src = img.url;
+      map[img.id] = im;
+    });
+    setLoadedImages(map);
+  }, [images]);
+
+  /* ---------------------------------- */
+  /* Upload & Layout                    */
+  /* ---------------------------------- */
+  const uploadAndExtract = async () => {
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append("file", file);
+    const fd = new FormData();
+    fd.append("file", file);
 
-    try {
-      const extractRes = await axios.post<{ image_ids: string[] }>(
-        "http://localhost:5000/extract_img",
-        formData
-      );
+    const extract = await axios.post("http://localhost:5000/extract_img", fd);
+    const layout = await axios.post("http://localhost:5000/layout", {
+      image_ids: extract.data.image_ids,
+      margin: 40,
+      gap: 20,
+      default_scale: 0.5,
+    });
 
-      const layoutRes = await axios.post("http://localhost:5000/layout", {
-        image_ids: extractRes.data.image_ids,
-        margin: 40,
-        gap: 20,
-        default_scale: 0.5,
-      });
-
-      const layoutData = layoutRes.data.layout;
-      const newImages: CanvasImage[] = [];
-
-      Object.entries(layoutData).forEach(([pageNum, items]: any) => {
-        items.forEach((item: any) => {
-          newImages.push({
-            id: item.image_id,
-            url: item.url,
-            x: item.x,
-            y: item.y,
-            width: item.width,
-            height: item.height,
-            page: Number(pageNum),
-          });
+    const newImages: CanvasImage[] = [];
+    Object.entries(layout.data.layout).forEach(([page, items]: any) => {
+      items.forEach((it: any) => {
+        newImages.push({
+          id: it.image_id,
+          url: it.url,
+          x: it.x,
+          y: it.y,
+          width: it.width,
+          height: it.height,
+          page: Number(page),
         });
       });
+    });
 
-      setImages(newImages);
-      setPageCount(Object.keys(layoutData).length);
-    } catch (err: any) {
-      console.error("Error uploading/extracting:", err);
-    }
+    setImages(newImages);
+    setPageCount(Object.keys(layout.data.layout).length);
   };
 
-  /* 🔹 Draw images with page breaks */
+  /* ---------------------------------- */
+  /* Draw Canvas                        */
+  /* ---------------------------------- */
   const drawLayout = () => {
-  const canvas = canvasRef.current;
-  if (!canvas) return;
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  canvas.width = 794;
-  canvas.height = 1123 * pageCount;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Page breaks
-  ctx.strokeStyle = "#888";
-  ctx.lineWidth = 1;
-  for (let i = 1; i < pageCount; i++) {
-    const y = i * 1123;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  images.forEach((item) => {
-    const img = loadedImages[item.id];
-    if (!img) return; // skip if not loaded yet
-
-    ctx.drawImage(
-      img,
-      item.x,
-      item.y + (item.page - 1) * 1123,
-      item.width,
-      item.height
-    );
-
-    if (item.id === selectedImageId) {
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(
-        item.x,
-        item.y + (item.page - 1) * 1123,
-        item.width,
-        item.height
-      );
-    }
-  });
-};
-
-
-  useEffect(() => {
-  drawLayout();
-}, [images, pageCount, selectedImageId, loadedImages]);
-
-
-  /* 🔹 Mouse Events */
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    canvas.width = A4_WIDTH;
+    canvas.height = A4_HEIGHT * pageCount;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Page breaks
+    ctx.setLineDash([6, 6]);
+    for (let i = 1; i < pageCount; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, i * A4_HEIGHT);
+      ctx.lineTo(A4_WIDTH, i * A4_HEIGHT);
+      ctx.strokeStyle = "#aaa";
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    images.forEach((img) => {
+      const im = loadedImages[img.id];
+      if (!im) return;
+
+      const yOffset = (img.page - 1) * A4_HEIGHT;
+      ctx.drawImage(im, img.x, img.y + yOffset, img.width, img.height);
+
+      if (img.id === selectedImageId) {
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(img.x, img.y + yOffset, img.width, img.height);
+
+        drawHandles(ctx, img, yOffset);
+      }
+    });
+  };
+
+  const drawHandles = (
+    ctx: CanvasRenderingContext2D,
+    img: CanvasImage,
+    yOffset: number
+  ) => {
+    const points = [
+      [img.x, img.y + yOffset],
+      [img.x + img.width, img.y + yOffset],
+      [img.x, img.y + img.height + yOffset],
+      [img.x + img.width, img.y + img.height + yOffset],
+    ];
+
+    points.forEach(([x, y]) => {
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#000";
+      ctx.fillRect(x - HANDLE_SIZE / 2, y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+      ctx.strokeRect(x - HANDLE_SIZE / 2, y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+    });
+  };
+
+  useEffect(drawLayout, [images, pageCount, selectedImageId, loadedImages]);
+
+  /* ---------------------------------- */
+  /* Resize Handle Detection            */
+  /* ---------------------------------- */
+  const getResizeHandle = (x: number, y: number, img: CanvasImage): ResizeHandle => {
+  const yOffset = (img.page - 1) * A4_HEIGHT;
+  const map = {
+    nw: [img.x, img.y + yOffset],
+    ne: [img.x + img.width, img.y + yOffset],
+    sw: [img.x, img.y + img.height + yOffset],
+    se: [img.x + img.width, img.y + img.height + yOffset],
+  };
+
+  for (const k of Object.keys(map) as (keyof typeof map)[]) {
+    const [hx, hy] = map[k];
+    if (Math.abs(x - hx) < HANDLE_SIZE && Math.abs(y - hy) < HANDLE_SIZE) {
+      return k as ResizeHandle;
+    }
+  }
+  return null;
+};
+
+  /* ---------------------------------- */
+  /* Mouse Events                       */
+  /* ---------------------------------- */
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
     for (let i = images.length - 1; i >= 0; i--) {
       const img = images[i];
-      const imgY = img.y + (img.page - 1) * 1123;
+      const yOffset = (img.page - 1) * A4_HEIGHT;
+
+      const handle = getResizeHandle(x, y, img);
+      if (handle) {
+        setSelectedImageId(img.id);
+        setResizeHandle(handle);
+        setIsDragging(true);
+        return;
+      }
+
       if (
         x >= img.x &&
         x <= img.x + img.width &&
-        y >= imgY &&
-        y <= imgY + img.height
+        y >= img.y + yOffset &&
+        y <= img.y + img.height + yOffset
       ) {
         setSelectedImageId(img.id);
-        setDragOffset({ x: x - img.x, y: y - imgY });
+        setResizeHandle(null);
+        setDragOffset({ x: x - img.x, y: y - (img.y + yOffset) });
         setIsDragging(true);
         return;
       }
@@ -162,73 +201,61 @@ const ImageCanvas: React.FC = () => {
     setSelectedImageId(null);
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement, MouseEvent>) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDragging || !selectedImageId) return;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
     setImages((prev) =>
-      prev.map((img) =>
-        img.id === selectedImageId
-          ? { ...img, x: x - dragOffset.x, y: y - dragOffset.y - (img.page - 1) * 1123 }
-          : img
-      )
+      prev.map((img) => {
+        if (img.id !== selectedImageId) return img;
+
+        const yOffset = (img.page - 1) * A4_HEIGHT;
+        const copy = { ...img };
+
+        if (resizeHandle === "se") {
+          copy.width = Math.max(30, x - img.x);
+          copy.height = Math.max(30, y - yOffset - img.y);
+        } else if (resizeHandle === "nw") {
+          const dx = img.x - x;
+          const dy = img.y - (y - yOffset);
+          copy.x = x;
+          copy.y = y - yOffset;
+          copy.width += dx;
+          copy.height += dy;
+        } else {
+          copy.x = x - dragOffset.x;
+          copy.y = y - dragOffset.y - yOffset;
+        }
+        return copy;
+      })
     );
   };
 
   const handleMouseUp = () => {
     setIsDragging(false);
+    setResizeHandle(null);
   };
 
-  /* 🔹 Resize selected image */
-  const handleResize = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedImageId) return;
-    const size = Number(e.target.value);
-    setImages((prev) =>
-      prev.map((img) =>
-        img.id === selectedImageId ? { ...img, width: size, height: size } : img
-      )
-    );
-  };
-
+  /* ---------------------------------- */
+  /* UI                                 */
+  /* ---------------------------------- */
   return (
     <div>
-      <input
-        type="file"
-        accept=".pdf,image/*"
-        onChange={(e) => e.target.files && setFile(e.target.files[0])}
-      />
-      <button onClick={uploadAndExtract} style={{ marginLeft: "10px" }}>
+      <input type="file" onChange={(e) => e.target.files && setFile(e.target.files[0])} />
+      <button onClick={uploadAndExtract} style={{ marginLeft: 10 }}>
         Generate Layout
       </button>
-
-      {/* 🔹 Resize above canvas */}
-      {selectedImageId && (
-        <div style={{ margin: "10px 0" }}>
-          <label>Resize Selected Image: </label>
-          <input
-            type="range"
-            min={50}
-            max={600}
-            value={
-              images.find((img) => img.id === selectedImageId)?.width || 50
-            }
-            onChange={handleResize}
-          />
-        </div>
-      )}
 
       <canvas
         ref={canvasRef}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        style={{ border: "1px solid #ccc", cursor: "move" }}
+        style={{ border: "1px solid #ccc", marginTop: 10, cursor: "move" }}
       />
     </div>
   );
