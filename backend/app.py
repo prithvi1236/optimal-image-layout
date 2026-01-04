@@ -1,11 +1,18 @@
 import os
 import io
 import uuid
-import fitz                 # PyMuPDF
+import fitz  # PyMuPDF
+import traceback
 from PIL import Image
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from rectpack import newPacker
 
-app = Flask(__name__)
+# =========================
+# # CONFIG
+# =========================
+A4_WIDTH = 794    # px (96 DPI)
+A4_HEIGHT = 1123
 
 UPLOAD_FOLDER = "uploads"
 OUTPUT_FOLDER = "output"
@@ -13,77 +20,190 @@ OUTPUT_FOLDER = "output"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
+# =========================
+# APP SETUP
+# =========================
+app = Flask(__name__)
+CORS(app)
 
+# =========================
+# IN-MEMORY IMAGE DB
+# =========================
+images_db = {}  # image_id -> {path, width, height}
+
+# =========================
+# HELPERS
+# =========================
 def extract_images_from_pdf(pdf_path):
-    """
-    Extract all images from a PDF and save them as image files
-    """
-    saved_images = []
+    saved_ids = []
     doc = fitz.open(pdf_path)
 
-    for page_num in range(doc.page_count):
-        page = doc.load_page(page_num)
-        images = page.get_images(full=True)
-
-        for img in images:
+    for page in doc:
+        for img in page.get_images(full=True):
             xref = img[0]
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
 
             image = Image.open(io.BytesIO(image_bytes))
-            img_name = f"{uuid.uuid4()}.png"
+            img_id = str(uuid.uuid4())
+            img_name = f"{img_id}.png"
             img_path = os.path.join(OUTPUT_FOLDER, img_name)
 
             image.save(img_path)
-            saved_images.append(img_path)
+
+            images_db[img_id] = {
+                "path": img_path,
+                "width": image.width,
+                "height": image.height
+            }
+
+            saved_ids.append(img_id)
 
     doc.close()
-    return saved_images
+    return saved_ids
 
 
+# =========================
+# ROUTES
+# =========================
 @app.route("/")
 def home():
     return "PDF Image Extraction Backend Running"
 
 
+@app.route("/output/<filename>")
+def get_image(filename):
+    return send_from_directory(OUTPUT_FOLDER, filename)
+
+
 @app.route("/extract_img", methods=["POST"])
 def extract_img():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
 
-    file = request.files["file"]
-    
-    if file.filename == "":
-        return jsonify({"error": "Empty filename"}), 400
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "Empty filename"}), 400
 
-    filename = file.filename
-    file_ext = os.path.splitext(filename)[1].lower()  # Get extension
+        filename = file.filename
+        ext = os.path.splitext(filename)[1].lower()
+        temp_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(temp_path)
 
-    # Save file temporarily
-    temp_path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(temp_path)
+        image_ids = []
 
-    saved_images = []
+        if ext == ".pdf":
+            image_ids = extract_images_from_pdf(temp_path)
 
-    if file_ext == ".pdf":
-        # Extract images from PDF
-        saved_images = extract_images_from_pdf(temp_path)
-    elif file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"]:
-        # It's an image, just save to output folder
-        img_name = f"{uuid.uuid4()}{file_ext}"
-        img_path = os.path.join(OUTPUT_FOLDER, img_name)
-        image = Image.open(temp_path)
-        image.save(img_path)
-        saved_images.append(img_path)
-    else:
-        return jsonify({"error": "Unsupported file type"}), 400
+        elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"]:
+            img = Image.open(temp_path)
+            img_id = str(uuid.uuid4())
+            img_name = f"{img_id}{ext}"
+            img_path = os.path.join(OUTPUT_FOLDER, img_name)
+            img.save(img_path)
 
-    return jsonify({
-        "message": "File processed successfully",
-        "count": len(saved_images),
-        "images": saved_images
-    })
+            images_db[img_id] = {
+                "path": img_path,
+                "width": img.width,
+                "height": img.height
+            }
+            image_ids.append(img_id)
+
+        else:
+            return jsonify({"error": "Unsupported file type"}), 400
+
+        return jsonify({
+            "message": "Processed successfully",
+            "image_ids": image_ids
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
+# =========================
+# LAYOUT API
+# =========================
+@app.route("/layout", methods=["POST"])
+def create_layout():
+    try:
+        data = request.get_json()
+
+        image_ids = data.get("image_ids", [])
+        margin = data.get("margin", 50)
+        scale = data.get("default_scale", 0.5)
+        gap = data.get("gap", 20)
+
+        if not image_ids:
+            return jsonify({"error": "No images provided"}), 400
+
+        rectangles = []
+
+        for img_id in image_ids:
+            img = images_db.get(img_id)
+            if not img:
+                return jsonify({"error": f"Image {img_id} not found"}), 404
+
+            w = int(img["width"] * scale)
+            h = int(img["height"] * scale)
+
+            rectangles.append((w + gap, h + gap, img_id, w, h))
+
+        layout = pack_rectangles(
+            rectangles,
+            A4_WIDTH - 2 * margin,
+            A4_HEIGHT - 2 * margin,
+            gap
+        )
+
+        return jsonify({
+            "page_count": len(layout),
+            "layout": layout
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# =========================
+# PACKING LOGIC
+# =========================
+def pack_rectangles(rectangles, bin_w, bin_h, gap):
+    packer = newPacker(rotation=False)
+
+    for _ in range(10):  # max 10 A4 pages
+        packer.add_bin(bin_w, bin_h)
+
+    for w_gap, h_gap, rid, w, h in rectangles:
+        packer.add_rect(w_gap, h_gap, rid)
+
+    packer.pack()
+
+    layout = {}
+
+    for bin_id, x, y, w_gap, h_gap, rid in packer.rect_list():
+        for r in rectangles:
+            if r[2] == rid:
+                orig_w, orig_h = r[3], r[4]
+                break
+
+        layout.setdefault(bin_id, []).append({
+            "image_id": rid,
+            "x": x + gap // 2,
+            "y": y + gap // 2,
+            "width": orig_w,
+            "height": orig_h,
+            "url": f"http://localhost:5000/output/{rid}.png"
+        })
+
+    return layout
+
+
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     app.run(debug=True)
