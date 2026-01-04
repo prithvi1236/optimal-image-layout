@@ -14,6 +14,9 @@ type CanvasImage = {
 
 const A4_WIDTH = 794;
 const A4_HEIGHT = 1123;
+const MARGIN = 40;
+const GAP = 20;
+
 
 const ImageCanvasStudio: React.FC = () => {
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
@@ -108,30 +111,100 @@ const ImageCanvasStudio: React.FC = () => {
   useEffect(renderAll, [renderAll]);
 
   const uploadAndExtract = async (selectedFile?: File) => {
-    const targetFile = selectedFile || file;
-    if (!targetFile) return;
-    setLoading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", targetFile);
-      const extract = await axios.post("http://localhost:5001/extract_img", fd);
-      const layout = await axios.post("http://localhost:5001/layout", {
-        image_ids: extract.data.image_ids, margin: 40, gap: 20, default_scale: 0.5,
-      });
+  const targetFile = selectedFile || file;
+  if (!targetFile) return;
 
-      const newImages: CanvasImage[] = [];
-      Object.entries(layout.data.layout).forEach(([page, items]: any) => {
-        items.forEach((it: any) => {
-          newImages.push({
-            id: it.image_id, url: it.url, x: it.x, y: it.y,
-            width: it.width, height: it.height, page: Number(page),
+  setLoading(true);
+
+  try {
+    const fd = new FormData();
+    fd.append("file", targetFile);
+
+    const extract = await axios.post("http://localhost:5000/extract_img", fd);
+    const layout = await axios.post("http://localhost:5000/layout", {
+      image_ids: extract.data.image_ids,
+      margin: MARGIN,
+      gap: GAP,
+      default_scale: 0.5,
+    });
+
+    setImages(prevImages => {
+      /** ================================
+       * FIRST UPLOAD → USE BACKEND AS-IS
+       * ================================ */
+      if (prevImages.length === 0) {
+        const initialImages: CanvasImage[] = [];
+
+        Object.entries(layout.data.layout).forEach(([page, items]: any) => {
+          items.forEach((it: any) => {
+            initialImages.push({
+              id: it.image_id,
+              url: it.url,
+              x: it.x,
+              y: it.y,
+              width: it.width,
+              height: it.height,
+              page: Number(page),
+            });
           });
         });
+
+        setPageCount(
+          Math.max(...initialImages.map(i => i.page), 1)
+        );
+
+        return initialImages;
+      }
+
+      /** ================================
+       * NEXT UPLOADS → APPEND ONLY
+       * ================================ */
+      const updatedImages = [...prevImages];
+
+      let lastPage = Math.max(...prevImages.map(i => i.page));
+      const lastPageImages = prevImages.filter(i => i.page === lastPage);
+
+      // find vertical cursor on last page
+      let cursorY = MARGIN;
+      lastPageImages.forEach(img => {
+        cursorY = Math.max(cursorY, img.y + img.height + GAP);
       });
-      setImages(newImages);
-      setPageCount(Object.keys(layout.data.layout).length || 1);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
-  };
+
+      // flatten backend output
+      const newItems = Object.values(layout.data.layout).flat() as any[];
+
+      newItems.forEach(it => {
+        // if doesn't fit → new page
+        if (cursorY + it.height > A4_HEIGHT - MARGIN) {
+          lastPage += 1;
+          cursorY = MARGIN;
+        }
+
+        updatedImages.push({
+          id: `${it.image_id}_${crypto.randomUUID()}`,
+          url: it.url,
+          x: MARGIN,              // ⬅️ simple left-aligned append
+          y: cursorY,
+          width: it.width,
+          height: it.height,
+          page: lastPage,
+        });
+
+        cursorY += it.height + GAP;
+      });
+
+      setPageCount(lastPage);
+      return updatedImages;
+    });
+
+  } catch (err) {
+    console.error(err);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   const UploadZone = ({ centered }: { centered?: boolean }) => (
     <div className={`group relative border-2 border-dashed border-zinc-200 rounded-2xl transition-all hover:border-indigo-400 hover:bg-indigo-50/50 cursor-pointer flex flex-col items-center justify-center

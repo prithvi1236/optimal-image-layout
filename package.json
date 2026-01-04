@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "jspdf": "^4.0.0",
+    "lucide-react": "^0.562.0",
+    "tailwindcss": "^4.1.18"
+  }
+}
