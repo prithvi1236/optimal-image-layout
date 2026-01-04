@@ -11,7 +11,7 @@ from rectpack import newPacker, PackingMode, MaxRectsBssf
 # =========================
 # CONFIG
 # =========================
-A4_WIDTH = 794
+A4_WIDTH = 794     # px @ 96 DPI
 A4_HEIGHT = 1123
 
 UPLOAD_FOLDER = "uploads"
@@ -47,7 +47,8 @@ def extract_images_from_pdf(pdf_path):
 
             image = Image.open(io.BytesIO(image_bytes))
             img_id = str(uuid.uuid4())
-            img_path = os.path.join(OUTPUT_FOLDER, f"{img_id}.{ext}")
+            img_name = f"{img_id}.{ext}"
+            img_path = os.path.join(OUTPUT_FOLDER, img_name)
 
             image.save(img_path)
 
@@ -81,6 +82,9 @@ def extract_img():
             return jsonify({"error": "No file uploaded"}), 400
 
         file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "Empty filename"}), 400
+
         filename = file.filename
         ext = os.path.splitext(filename)[1].lower()
         temp_path = os.path.join(UPLOAD_FOLDER, filename)
@@ -94,7 +98,8 @@ def extract_img():
         elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"]:
             image = Image.open(temp_path)
             img_id = str(uuid.uuid4())
-            img_path = os.path.join(OUTPUT_FOLDER, f"{img_id}{ext}")
+            img_name = f"{img_id}{ext}"
+            img_path = os.path.join(OUTPUT_FOLDER, img_name)
             image.save(img_path)
 
             images_db[img_id] = {
@@ -109,7 +114,10 @@ def extract_img():
         else:
             return jsonify({"error": "Unsupported file type"}), 400
 
-        return jsonify({"image_ids": image_ids})
+        return jsonify({
+            "message": "Images extracted",
+            "image_ids": image_ids
+        })
 
     except Exception as e:
         traceback.print_exc()
@@ -128,6 +136,9 @@ def create_layout():
         gap = data.get("gap", 20)
         scale = data.get("default_scale", 0.5)
 
+        if not image_ids:
+            return jsonify({"error": "No images provided"}), 400
+
         rectangles = []
 
         for img_id in image_ids:
@@ -135,15 +146,15 @@ def create_layout():
             if not img:
                 continue
 
-            w = int(img["width"] * scale) + gap
-            h = int(img["height"] * scale) + gap
+            w = int(img["width"] * scale)
+            h = int(img["height"] * scale)
+
             rectangles.append((img_id, w, h))
 
         layout = pack_rectangles(
             rectangles,
             A4_WIDTH - 2 * margin,
             A4_HEIGHT - 2 * margin,
-            margin,
             gap
         )
 
@@ -157,29 +168,11 @@ def create_layout():
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# MAXRECTS PACKING (FIXED)
+# MAXRECTS PACKING (CORE)
 # =========================
-def pack_rectangles(rectangles, bin_w, bin_h, margin, gap):
+def pack_rectangles(rectangles, bin_w, bin_h, gap):
     rectangles.sort(key=lambda r: r[1] * r[2], reverse=True)
 
-    # 🔥 PASS 1: try fitting everything in ONE page
-    packer = newPacker(
-        mode=PackingMode.Offline,
-        pack_algo=MaxRectsBssf,
-        rotation=False
-    )
-
-    packer.add_bin(bin_w, bin_h)
-
-    for img_id, w, h in rectangles:
-        packer.add_rect(w, h, img_id)
-
-    packer.pack()
-
-    if len(packer.rect_list()) == len(rectangles):
-        return build_layout(packer, margin, gap)
-
-    # 🔥 PASS 2: fallback to multiple pages
     packer = newPacker(
         mode=PackingMode.Offline,
         pack_algo=MaxRectsBssf,
@@ -194,23 +187,22 @@ def pack_rectangles(rectangles, bin_w, bin_h, margin, gap):
 
     packer.pack()
 
-    return build_layout(packer, margin, gap)
-
-def build_layout(packer, margin, gap):
     layout = {}
 
     for bin_id, x, y, w, h, img_id in packer.rect_list():
         img = images_db[img_id]
+
         layout.setdefault(bin_id + 1, []).append({
             "image_id": img_id,
-            "x": x + margin,
-            "y": y + margin,
+            "x": x + gap // 2,
+            "y": y + gap // 2,
             "width": w - gap,
             "height": h - gap,
             "url": f"http://localhost:5000/output/{img_id}.{img['ext']}"
         })
 
     return layout
+
 
 # =========================
 # RUN

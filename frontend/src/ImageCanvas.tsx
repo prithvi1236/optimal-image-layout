@@ -92,31 +92,26 @@ const ImageCanvas: React.FC = () => {
     default_scale: 0.5,
   });
 
-  setImages((prevImages) => {
-    const existingPages = pageCount;
-    const newImages: CanvasImage[] = [];
+  const newImages: CanvasImage[] = [];
 
-    Object.entries(layout.data.layout).forEach(([page, items]: any) => {
-      items.forEach((it: any) => {
-        newImages.push({
-          id: `${it.image_id}_${crypto.randomUUID()}`, // 🔥 safest unique ID
-          url: it.url,
-          x: it.x,
-          y: it.y,
-          width: it.width,
-          height: it.height,
-          page: Number(page) + existingPages, // ✅ correct
-        });
+  Object.entries(layout.data.layout).forEach(([page, items]: any) => {
+    items.forEach((it: any) => {
+      newImages.push({
+        id: `${it.image_id}_${crypto.randomUUID()}`,
+        url: it.url,
+        x: it.x,
+        y: it.y,
+        width: it.width,
+        height: it.height,
+        page: Number(page), // ✅ keeps the layout on same pages
       });
     });
-
-    return [...prevImages, ...newImages];
   });
 
-  setPageCount(
-    (prev) => prev + Object.keys(layout.data.layout).length
-  );
+  setImages((prev) => [...prev, ...newImages]);
+  setPageCount(Math.max(pageCount, Object.keys(layout.data.layout).length));
 };
+
 
 
 
@@ -198,6 +193,7 @@ const getCursorForHandle = (handle: ResizeHandle) => {
 
 
   useEffect(drawLayout, [images, pageCount, selectedImageId, loadedImages]);
+  const lastusedpage=pageCount;
 
   /* ---------------------------------- */
   /* Resize Handle Detection            */
