@@ -15,7 +15,8 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 - **Multi-Page Support**: Automatically creates additional pages when needed
 - **Responsive Design**: Modern, clean interface with zoom controls
 
-## Layout Interface <img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/c354bdc4-c32a-473b-a816-d33aa2d19c0a" />
+## Layout Interface 
+![Image](https://github.com/user-attachments/assets/f706e46f-07e4-46a0-b820-e522fcec40bc)
 
 ## 🚀 Quick Start
 
