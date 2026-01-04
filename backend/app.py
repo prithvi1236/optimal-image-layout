@@ -24,7 +24,16 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # APP SETUP
 # =========================
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+
+# ✅ CORRECT CORS (ONLY THIS)
+CORS(
+    app,
+    resources={r"/*": {"origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ]}},
+    supports_credentials=False
+)
 
 # =========================
 # IN-MEMORY IMAGE DB
@@ -198,7 +207,7 @@ def pack_rectangles(rectangles, bin_w, bin_h, gap):
             "y": y + gap // 2,
             "width": w - gap,
             "height": h - gap,
-            "url": f"http://localhost:5000/output/{img_id}.{img['ext']}"
+            "url": f"http://localhost:5001/output/{img_id}.{img['ext']}"
         })
 
     return layout
@@ -208,4 +217,4 @@ def pack_rectangles(rectangles, bin_w, bin_h, gap):
 # RUN
 # =========================
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)
