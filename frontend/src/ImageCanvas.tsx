@@ -46,6 +46,37 @@ const ImageCanvas: React.FC = () => {
   /* ---------------------------------- */
   /* Upload & Layout                    */
   /* ---------------------------------- */
+  const drawArrow = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  dx: number,
+  dy: number
+) => {
+  const length = 14;
+  const head = 6;
+
+  // Main line
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + dx * length, y + dy * length);
+  ctx.stroke();
+
+  // Arrow head
+  ctx.beginPath();
+  ctx.moveTo(x + dx * length, y + dy * length);
+  ctx.lineTo(
+    x + dx * (length - head) - dy * head,
+    y + dy * (length - head) + dx * head
+  );
+  ctx.lineTo(
+    x + dx * (length - head) + dy * head,
+    y + dy * (length - head) - dx * head
+  );
+  ctx.closePath();
+  ctx.fill();
+};
+
   const uploadAndExtract = async () => {
     if (!file) return;
 
@@ -122,24 +153,39 @@ const ImageCanvas: React.FC = () => {
   };
 
   const drawHandles = (
-    ctx: CanvasRenderingContext2D,
-    img: CanvasImage,
-    yOffset: number
-  ) => {
-    const points = [
-      [img.x, img.y + yOffset],
-      [img.x + img.width, img.y + yOffset],
-      [img.x, img.y + img.height + yOffset],
-      [img.x + img.width, img.y + img.height + yOffset],
-    ];
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImage,
+  yOffset: number
+) => {
+  ctx.strokeStyle = "#222";
+  ctx.fillStyle = "#222";
+  ctx.lineWidth = 2;
 
-    points.forEach(([x, y]) => {
-      ctx.fillStyle = "#fff";
-      ctx.strokeStyle = "#000";
-      ctx.fillRect(x - HANDLE_SIZE / 2, y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
-      ctx.strokeRect(x - HANDLE_SIZE / 2, y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
-    });
-  };
+  const left = img.x;
+  const right = img.x + img.width;
+  const top = img.y + yOffset;
+  const bottom = img.y + img.height + yOffset;
+
+  // ↖ NW
+  drawArrow(ctx, left, top, -1, -1);
+
+  // ↗ NE
+  drawArrow(ctx, right, top, 1, -1);
+
+  // ↙ SW
+  drawArrow(ctx, left, bottom, -1, 1);
+
+  // ↘ SE
+  drawArrow(ctx, right, bottom, 1, 1);
+};
+
+const getCursorForHandle = (handle: ResizeHandle) => {
+  if (handle === "nw" || handle === "se") return "nwse-resize";
+  if (handle === "ne" || handle === "sw") return "nesw-resize";
+  return "move";
+};
+
+
 
   useEffect(drawLayout, [images, pageCount, selectedImageId, loadedImages]);
 
@@ -251,12 +297,17 @@ const ImageCanvas: React.FC = () => {
       </button>
 
       <canvas
-        ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        style={{ border: "1px solid #ccc", marginTop: 10, cursor: "move" }}
-      />
+  ref={canvasRef}
+  onMouseDown={handleMouseDown}
+  onMouseMove={handleMouseMove}
+  onMouseUp={handleMouseUp}
+  style={{
+    border: "1px solid #ccc",
+    marginTop: 10,
+    cursor: resizeHandle ? getCursorForHandle(resizeHandle) : "move",
+  }}
+/>
+
     </div>
   );
 };
