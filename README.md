@@ -16,9 +16,10 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 - **Responsive Design**: Modern, clean interface with zoom controls
 
 ## Buttons and their purposes
--**Add Images/pdf**:Upload images or PDFs. PDF images are automatically extracted and placed intelligently.
--**Extract Figures from Photo**:Extract diagrams and figures from inside a single photo.
--**🗑️ Cleanup**:Clear unused pages and temporary files in the background.
+
+- **Add Images/pdf**:Upload images or PDFs. PDF images are automatically extracted and placed intelligently.
+- **Extract Figures from Photo**:Extract diagrams and figures from inside a single photo.
+- **🗑️ Cleanup**:Clear unused pages and temporary files in the background.
 
 ## Layout Interface 
 ![Image](https://github.com/user-attachments/assets/f706e46f-07e4-46a0-b820-e522fcec40bc)
