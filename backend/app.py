@@ -81,7 +81,8 @@ def extract_images_from_pdf(pdf_path):
             extracted_data.append({
                 "id": img_id,
                 "width": image.width,
-                "height": image.height
+                "height": image.height,
+                "ext": ext
             })
 
     doc.close()
@@ -131,7 +132,10 @@ def extract_figures_from_image(image_path):
             extracted.append({
                 "id": img_id,
                 "width": w,
-                "height": h
+                "height": h,
+                 "ext": "png"
+
+
             })
 
     return extracted
@@ -192,10 +196,13 @@ def extract_img():
                 }
 
                 response_images.append({
-                    "id": img_id,
-                    "width": image.width,
-                    "height": image.height
-                })
+    "id": img_id,
+    "width": image.width,
+    "height": image.height,
+    "ext": save_ext
+})
+
+
 
 
         else:

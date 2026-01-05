@@ -48,6 +48,7 @@ const API_URL = "http://localhost:5001";
 const MAX_CONTENT_WIDTH = A4_WIDTH - 80;   // margin * 2
 const MAX_CONTENT_HEIGHT = A4_HEIGHT - 80;
 const HANDLE_SIZE = 10;
+const STORAGE_KEY = "smart_layout_state_v1";
 
 const getFitScale = (w: number, h: number) => {
   const scaleW = MAX_CONTENT_WIDTH / w;
