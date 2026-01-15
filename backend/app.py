@@ -271,8 +271,20 @@ def create_layout():
 
             # Calculate Scaled Dimensions
             # Add gap to the size so the packer reserves space around it
-            w = int(img_entry["width"] * scale) + gap
-            h = int(img_entry["height"] * scale) + gap
+            # w = int(img_entry["width"] * scale) + gap
+            # h = int(img_entry["height"] * scale) + gap
+            max_h = A4_HEIGHT - 2 * margin - gap
+            scaled_w = int(img_entry["width"] * scale)
+            scaled_h = int(img_entry["height"] * scale)
+
+            if scaled_h > max_h:
+                ratio = max_h / scaled_h
+                scaled_h = max_h
+                scaled_w = int(scaled_w * ratio)
+
+            w = scaled_w + gap
+            h = scaled_h + gap
+
             
             rectangles.append((w, h, img_id))
 

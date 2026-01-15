@@ -16,8 +16,19 @@ import {
 } from "lucide-react";
 
 // ================= TYPES =================
+// type LayoutItem = {
+//   id: string;
+//   url: string;
+//   x: number;
+//   y: number;
+//   width: number;
+//   height: number;
+//   page: number;
+// };
+
 type LayoutItem = {
-  id: string;
+  layoutId: string; // ✅ unique per layout instance
+  imageId: string;  // original image id
   url: string;
   x: number;
   y: number;
@@ -25,6 +36,7 @@ type LayoutItem = {
   height: number;
   page: number;
 };
+
 
 type AssetItem = {
   id: string;
@@ -66,7 +78,8 @@ const ImageCanvasStudio: React.FC = () => {
   >({});
 
   // Interaction
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
+
   const [interaction, setInteraction] = useState<InteractionState>(null);
   const [viewZoom, setViewZoom] = useState(0.6);
   const [activePageIndex, setActivePageIndex] = useState(1);
@@ -98,8 +111,9 @@ const ImageCanvasStudio: React.FC = () => {
       Object.entries(response.data.layout).forEach(([page, items]: any) => {
         items.forEach((it: any) => {
           newLayout.push({
-            id: it.image_id,
-            url: it.url,
+            layoutId: `${it.image_id}-${page}-${Math.random()}`,
+  imageId: it.image_id,
+  url: it.url,
             x: it.x,
             y: it.y,
             width: it.width,
@@ -118,25 +132,49 @@ const ImageCanvasStudio: React.FC = () => {
   }, []);
 
   // 2. DELETE IMAGE (Frontend + Backend)
-  const handleDelete = async (idToDelete: string) => {
-    if (!idToDelete) return;
+  // const handleDelete = async (idToDelete: string) => {
+  //   if (!idToDelete) return;
 
-    // 1. Optimistic UI Update: Remove immediately
-    const updatedAssets = assets.filter((a) => a.id !== idToDelete);
-    setAssets(updatedAssets);
-    setSelectedId(null); // Deselect
+  //   // 1. Optimistic UI Update: Remove immediately
+  //   const updatedAssets = assets.filter((a) => a.id !== idToDelete);
+  //   setAssets(updatedAssets);
+  //   setSelectedLayoutId(null); // Deselect
 
-    // 2. Trigger Layout Reflow
-    generateLayout(updatedAssets);
+  //   // 2. Trigger Layout Reflow
+  //   generateLayout(updatedAssets);
 
-    // 3. Call Backend to delete file
-    try {
-      await axios.post(`${API_URL}/delete_image`, { image_id: idToDelete });
-    } catch (err) {
-      console.error("Failed to delete on server", err);
-      // Optional: Revert UI if server fails? Usually not needed for simple tools.
-    }
-  };
+  //   // 3. Call Backend to delete file
+  //   try {
+  //     await axios.post(`${API_URL}/delete_image`, { image_id: idToDelete });
+  //   } catch (err) {
+  //     console.error("Failed to delete on server", err);
+  //     // Optional: Revert UI if server fails? Usually not needed for simple tools.
+  //   }
+  // };
+
+  const handleDelete = async (imageIdToDelete: string) => {
+  if (!imageIdToDelete) return;
+
+  // Remove asset
+  const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
+  setAssets(updatedAssets);
+
+  // Clear selection
+  setSelectedLayoutId(null);
+
+  // Reflow layout
+  generateLayout(updatedAssets);
+
+  // Backend delete
+  try {
+    await axios.post(`${API_URL}/delete_image`, {
+      image_id: imageIdToDelete,
+    });
+  } catch (err) {
+    console.error("Failed to delete on server", err);
+  }
+};
+
 
   const MARGIN = 40;
 const GAP = 20;
@@ -162,23 +200,33 @@ const getLastPageCursor = (page: number) => {
 
     const res = await axios.post(`${API_URL}/extract_img`, fd);
 
+    // const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
+    //   id: img.id,
+    //   // url: `${API_URL}/output/${img.id}.png`,
+    //   url: `${API_URL}/output/${img.id}.${img.ext}`,
+
+    //   scale: getFitScale(img.width, img.height),
+    //   origW: img.width,
+    //   origH: img.height,
+    // }));
     const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
-      id: img.id,
-      url: `${API_URL}/output/${img.id}.png`,
-      scale: getFitScale(img.width, img.height),
-      origW: img.width,
-      origH: img.height,
-    }));
+  id: img.id,
+  url: `${API_URL}/output/${img.id}.${img.ext}`,
+  scale: getFitScale(img.width, img.height),
+  origW: img.width,
+  origH: img.height,
+}));
 
     /* ============================
        FIRST UPLOAD → FULL LAYOUT
        ============================ */
     if (assets.length === 0) {
-      const updated = [...newAssets];
-      setAssets(updated);
-      await generateLayout(updated);
-      return;
-    }
+  const updated = [...newAssets];
+  setAssets(updated);
+  setTimeout(() => generateLayout(updated), 0);
+  return;
+}
+
 
     /* ============================
        SUBSEQUENT UPLOAD → APPEND
@@ -198,14 +246,16 @@ const getLastPageCursor = (page: number) => {
       }
 
       appendedLayouts.push({
-        id: asset.id,
-        url: asset.url,
-        x: MARGIN,
-        y: cursorY,
-        width: scaledW,
-        height: scaledH,
-        page: currentPage,
-      });
+  layoutId: `${asset.id}-${currentPage}-${Math.random()}`,
+  imageId: asset.id,
+  url: asset.url,
+  x: MARGIN,
+  y: cursorY,
+  width: scaledW,
+  height: scaledH,
+  page: currentPage,
+});
+
 
       cursorY += scaledH + GAP;
     });
@@ -224,22 +274,28 @@ const getLastPageCursor = (page: number) => {
 
   // 4. IMAGE LOADING
   useEffect(() => {
-    if (layoutImages.length === 0) return;
-    layoutImages.forEach((img) => {
-      if (loadedImages[img.id]) return;
-      const im = new Image();
-      im.crossOrigin = "anonymous";
-      im.src = img.url;
-      im.onload = () => setLoadedImages((prev) => ({ ...prev, [img.id]: im }));
-    });
-  }, [layoutImages]);
+  if (layoutImages.length === 0) return;
+
+  layoutImages.forEach(img => {
+    if (loadedImages[img.imageId]) return;
+
+    const im = new Image();
+    im.crossOrigin = "anonymous";
+    im.src = img.url;
+    im.onload = () =>
+      setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
+  });
+}, [layoutImages, loadedImages]);
 
   // Update layout locally (visual only)
-  const updateLocalLayout = (id: string, updates: Partial<LayoutItem>) => {
-    setLayoutImages((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
-    );
-  };
+  const updateLocalLayout = (layoutId: string, updates: Partial<LayoutItem>) => {
+  setLayoutImages(prev =>
+    prev.map(item =>
+      item.layoutId === layoutId ? { ...item, ...updates } : item
+    )
+  );
+};
+
 
   const exportToPDF = () => {
     const pdf = new jsPDF("p", "mm", "a4");
@@ -280,7 +336,8 @@ const getLastPageCursor = (page: number) => {
       ctx.save();
       ctx.scale(SCALE, SCALE);
       pageItems.forEach((img) => {
-        const im = loadedImages[img.id];
+        const im = loadedImages[img.imageId];
+
         if (im) ctx.drawImage(im, img.x, img.y, img.width, img.height);
         else {
           ctx.fillStyle = "#e5e7eb";
@@ -316,10 +373,11 @@ const getLastPageCursor = (page: number) => {
       ctx.fillRect(0, 0, A4_WIDTH, A4_HEIGHT);
 
       pageItems.forEach((img) => {
-        const im = loadedImages[img.id];
+        const im = loadedImages[img.imageId];
+
         if (im) ctx.drawImage(im, img.x, img.y, img.width, img.height);
 
-        if (selectedId === img.id) {
+        if (selectedLayoutId === img.layoutId) {
           ctx.strokeStyle = "#4f46e5";
           ctx.lineWidth = 2;
           ctx.strokeRect(img.x, img.y, img.width, img.height);
@@ -344,7 +402,7 @@ const getLastPageCursor = (page: number) => {
           });
         }
       });
-    }, [pageItems, loadedImages, selectedId]);
+    }, [pageItems, loadedImages, selectedLayoutId]);
 
     // Interaction Handlers
     const getMousePos = (e: React.MouseEvent) => {
@@ -362,7 +420,7 @@ const getLastPageCursor = (page: number) => {
 
       for (let i = pageItems.length - 1; i >= 0; i--) {
         const img = pageItems[i];
-        if (selectedId === img.id) {
+        if (selectedLayoutId === img.layoutId) {
           const hw = HANDLE_SIZE + 5;
           if (Math.abs(x - img.x) < hw && Math.abs(y - img.y) < hw)
             handleType = "nw";
@@ -398,16 +456,17 @@ const getLastPageCursor = (page: number) => {
       }
 
       if (clickedItem) {
-        setSelectedId(clickedItem.id);
-        setInteraction({
-          type: handleType ? "resize" : "move",
-          itemId: clickedItem.id,
-          startMouse: { x, y },
-          initialItem: { ...clickedItem },
-          handle: handleType || undefined,
-        });
+        setSelectedLayoutId(clickedItem.layoutId);
+setInteraction({
+  type: handleType ? "resize" : "move",
+  itemId: clickedItem.layoutId,
+  startMouse: { x, y },
+  initialItem: { ...clickedItem },
+  handle: handleType || undefined,
+});
+
       } else {
-        setSelectedId(null);
+        setSelectedLayoutId(null);
       }
     };
 
@@ -454,23 +513,36 @@ const getLastPageCursor = (page: number) => {
     };
 
     const handleMouseUp = () => {
-      if (interaction?.type === "resize") {
-        const item = layoutImages.find((i) => i.id === interaction.itemId);
-        const asset = assets.find((a) => a.id === interaction.itemId);
-        if (item && asset) {
-          const newScale = item.width / asset.origW;
-          const updatedAssets = assets.map((a) =>
-            a.id === asset.id ? { ...a, scale: newScale } : a
-          );
-          setAssets(updatedAssets);
-          generateLayout(updatedAssets);
-        }
-      }
-      setInteraction(null);
-    };
+  if (interaction?.type === "resize") {
+    const item = layoutImages.find(
+      i => i.layoutId === interaction.itemId
+    );
+    if (!item) return;
+
+    const asset = assets.find(
+      a => a.id === item.imageId
+    );
+    if (!asset) return;
+
+    const newScale = item.width / asset.origW;
+
+    const updatedAssets = assets.map(a =>
+      a.id === asset.id ? { ...a, scale: newScale } : a
+    );
+
+    setAssets(updatedAssets);
+    generateLayout(updatedAssets);
+  }
+
+  setInteraction(null);
+};
+
 
     // 🔹 FIND SELECTED ITEM ON THIS PAGE TO RENDER OVERLAY
-    const selectedItemOnPage = pageItems.find((i) => i.id === selectedId);
+    const selectedItemOnPage = pageItems.find(
+  i => i.layoutId === selectedLayoutId
+);
+
 
     return (
       <div className="relative w-full h-full">
@@ -496,9 +568,10 @@ const getLastPageCursor = (page: number) => {
               top: selectedItemOnPage.y - 12,
             }}
             onClick={(e) => {
-              e.stopPropagation(); // Prevent canvas click
-              handleDelete(selectedItemOnPage.id);
-            }}
+  e.stopPropagation();
+  handleDelete(selectedItemOnPage.imageId);
+}}
+
             title="Delete Image"
           >
             <X size={14} strokeWidth={3} />
