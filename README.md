@@ -15,7 +15,14 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 - **Multi-Page Support**: Automatically creates additional pages when needed
 - **Responsive Design**: Modern, clean interface with zoom controls
 
-## Layout Interface <img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/c354bdc4-c32a-473b-a816-d33aa2d19c0a" />
+## Buttons and their purposes
+
+- **Add Images/pdf**:Upload images or PDFs. PDF images are automatically extracted and placed intelligently.
+- **Extract Figures from Photo**:Extract diagrams and figures from inside a single photo.
+- **🗑️ Cleanup**:Clear unused pages and temporary files in the background.
+
+## Layout Interface 
+![Image](https://github.com/user-attachments/assets/f706e46f-07e4-46a0-b820-e522fcec40bc)
 
 ## 🚀 Quick Start
 
@@ -25,7 +32,7 @@ An intelligent image and PDF layout tool that automatically organizes your asset
 - **Node.js 18+** (for frontend)
 - **pip** and **npm/yarn**
 
-### Installation
+### Local Development
 
 1. **Clone the repository**
    ```bash
@@ -49,13 +56,35 @@ An intelligent image and PDF layout tool that automatically organizes your asset
    ```
    Frontend will run on `http://localhost:5173`
 
+### Production Deployment
+
+Deploy to Render.com with one click using the included configuration:
+
+1. **Push to GitHub**
+   ```bash
+   git add .
+   git commit -m "Deploy to Render"
+   git push origin main
+   ```
+
+2. **Deploy on Render**
+   - Go to [Render Dashboard](https://dashboard.render.com)
+   - Click "New" → "Blueprint"
+   - Connect your GitHub repository
+   - Render will auto-deploy both frontend and backend
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+
 ## 🛠️ Tech Stack
 
 ### Backend (Python/Flask)
 - **Flask**: Web framework with CORS support
+- **Flask-CORS**: Cross-origin support
+- **OpenCV(cv2)**: Image detection & figure extraction
 - **PyMuPDF (fitz)**: PDF processing and image extraction
 - **PIL (Pillow)**: Image manipulation and processing
 - **rectpack**: Advanced rectangle packing algorithms
+- **threading**: Background cleanup and non-blocking tasks
 - **UUID**: Unique identifier generation
 
 ### Frontend (React/TypeScript)
