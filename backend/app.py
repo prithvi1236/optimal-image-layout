@@ -1,127 +1,145 @@
 import os
 import io
 import uuid
-import time
-import shutil
-import threading
 import fitz  # PyMuPDF
 import traceback
 from PIL import Image
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from rectpack import newPacker, PackingMode, MaxRectsBssf, SORT_NONE
+import cv2
+import numpy as np
+
+
 
 # =========================
 # CONFIGURATION
 # =========================
 A4_WIDTH = 794
 A4_HEIGHT = 1123
-UPLOAD_BASE = "uploads"
-OUTPUT_BASE = "output"
 
-# Environment-based configuration
-PORT = int(os.environ.get("PORT", 5001))
-IS_PRODUCTION = os.environ.get("FLASK_ENV") == "production"
-SERVER_URL = os.environ.get("SERVER_URL", f"http://localhost:{PORT}")
+UPLOAD_FOLDER = "uploads"
+OUTPUT_FOLDER = "output"
 
-# Ensure directories exist
-os.makedirs(UPLOAD_BASE, exist_ok=True)
-os.makedirs(OUTPUT_BASE, exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
+# =========================
+# APP SETUP
+# =========================
 app = Flask(__name__)
 
-# CORS configuration for production
-if IS_PRODUCTION:
-    # In production, allow specific origins
-    CORS(app, resources={
-        r"/*": {
-            "origins": [
-                "https://smart-layout-frontend.onrender.com",
-                "https://*.onrender.com"
-            ]
-        }
-    })
-else:
-    # In development, allow all origins
-    CORS(app, resources={r"/*": {"origins": "*"}})
+# Allow CORS for your React Frontend
+CORS(
+    app,
+    resources={r"/*": {"origins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ]}},
+    supports_credentials=False
+)
 
 # =========================
-# IN-MEMORY DATABASE (Session Aware)
-# Structure: { session_id: { image_id: { path, width, height, ext } } }
+# IN-MEMORY DATABASE
 # =========================
+# Structure: image_id -> { "path": str, "width": int, "height": int, "ext": str }
 images_db = {}
 
 # =========================
-# HELPER: SESSION MANAGEMENT
+# HELPER FUNCTIONS
 # =========================
-def get_session_id():
-    """Retrieves the unique session ID from headers to isolate user data."""
-    sid = request.headers.get('x-session-id')
-    if not sid:
-        return "default_guest"
-    return sid
+def extract_images_from_pdf(pdf_path):
+    """
+    Extracts all images from a PDF file and saves them to the output folder.
+    Returns a list of image metadata objects.
+    """
+    extracted_data = []
+    doc = fitz.open(pdf_path)
 
-def get_user_folders(session_id):
-    """Creates/Retrieves session-specific folders for isolation."""
-    u_upload = os.path.join(UPLOAD_BASE, session_id)
-    u_output = os.path.join(OUTPUT_BASE, session_id)
-    os.makedirs(u_upload, exist_ok=True)
-    os.makedirs(u_output, exist_ok=True)
-    return u_upload, u_output
+    for page in doc:
+        for img in page.get_images(full=True):
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            ext = base_image["ext"]
 
-# =========================
-# BACKGROUND CLEANUP THREAD
-# =========================
-def cleanup_old_sessions():
-    """Deletes session folders older than 3 minutes to free up space."""
-    MAX_AGE = 600  # 10 min in seconds
-    while True:
-        try:
-            now = time.time()
-            cleaned_count = 0
-            
-            for root in [UPLOAD_BASE, OUTPUT_BASE]:
-                if not os.path.exists(root): 
-                    continue
-                
-                # List all items in the directory
-                items = os.listdir(root)
-                print(f"🔍 Checking {root}: found {len(items)} items")
-                
-                for sid in items:
-                    session_path = os.path.join(root, sid)
-                    
-                    # Only process directories (skip files like .DS_Store)
-                    if not os.path.isdir(session_path):
-                        continue
-                        
-                    # Check modification time
-                    mtime = os.stat(session_path).st_mtime
-                    age = now - mtime
-                    
-                    print(f"📁 Session {sid}: age = {age:.1f}s (max: {MAX_AGE}s)")
-                    
-                    if age > MAX_AGE:
-                        shutil.rmtree(session_path)
-                        print(f"🧹 Cleaned up expired session: {sid} (age: {age:.1f}s)")
-                        cleaned_count += 1
-                        
-                        # Remove from RAM database
-                        if sid in images_db:
-                            del images_db[sid]
-                            print(f"🗑️  Removed {sid} from memory database")
-            
-            if cleaned_count == 0:
-                print(f"✅ No cleanup needed - all sessions are recent")
-                        
-        except Exception as e:
-            print(f"❌ Cleanup Error: {e}")
-            traceback.print_exc()
-            
-        time.sleep(120)  # Run check every 2 min
+            # Load into PIL to get dimensions and save safely
+            image = Image.open(io.BytesIO(image_bytes))
+            img_id = str(uuid.uuid4())
+            img_path = os.path.join(OUTPUT_FOLDER, f"{img_id}.{ext}")
 
-# Start the cleanup thread automatically
-threading.Thread(target=cleanup_old_sessions, daemon=True).start()
+            image.save(img_path)
+
+            # Store in DB
+            images_db[img_id] = {
+                "path": img_path,
+                "width": image.width,
+                "height": image.height,
+                "ext": ext
+            }
+
+            extracted_data.append({
+                "id": img_id,
+                "width": image.width,
+                "height": image.height,
+                "ext": ext
+            })
+
+    doc.close()
+    return extracted_data
+
+def extract_figures_from_image(image_path):
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    thresh = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        15, 10
+    )
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    clean = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(
+        clean,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    extracted = []
+
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+
+        # filter noise / text
+        if w > 150 and h > 150:
+            crop = img[y:y+h, x:x+w]
+
+            img_id = str(uuid.uuid4())
+            img_path = os.path.join(OUTPUT_FOLDER, f"{img_id}.png")
+
+            cv2.imwrite(img_path, crop)
+
+            images_db[img_id] = {
+                "path": img_path,
+                "width": w,
+                "height": h,
+                "ext": "png"
+            }
+
+            extracted.append({
+                "id": img_id,
+                "width": w,
+                "height": h,
+                 "ext": "png"
+
+
+            })
+
+    return extracted
+
 
 # =========================
 # ROUTES
@@ -129,119 +147,69 @@ threading.Thread(target=cleanup_old_sessions, daemon=True).start()
 
 @app.route("/")
 def home():
-    return jsonify({
-        "status": "running",
-        "service": "Smart Layout Backend",
-        "version": "2.0",
-        "environment": "production" if IS_PRODUCTION else "development"
-    })
+    return "Final Image Layout Backend Running"
 
-@app.route("/health")
-def health_check():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": time.time(),
-        "sessions": len(images_db),
-        "uptime": "running"
-    })
-
-@app.route("/output/<session_id>/<filename>")
-def get_image(session_id, filename):
-    """Serves images from the user's specific session folder."""
-    user_out_path = os.path.join(OUTPUT_BASE, session_id)
-    return send_from_directory(user_out_path, filename)
+@app.route("/output/<filename>")
+def get_image(filename):
+    """Serves the static image files."""
+    return send_from_directory(OUTPUT_FOLDER, filename)
 
 @app.route("/extract_img", methods=["POST"])
 def extract_img():
     """
-    Handles both PDF extraction and direct Image uploads.
-    Supports: .pdf, .png, .jpg, .jpeg, .webp, .bmp
+    Uploads a file (PDF/Image), extracts content, saves to disk,
+    and returns metadata (ID, Width, Height) for the frontend.
     """
     try:
-        sid = get_session_id()
-        user_upload_dir, user_output_dir = get_user_folders(sid)
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
 
-        # Initialize session in DB if not present
-        if sid not in images_db:
-            images_db[sid] = {}
+        file = request.files["file"]
+        filename = file.filename
+        ext = os.path.splitext(filename)[1].lower()
+        temp_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(temp_path)
 
-        if "files" not in request.files:
-            return jsonify({"error": "No files uploaded"}), 400
+        response_images = []
 
-        files = request.files.getlist("files")
-        response_data = []
+        if ext == ".pdf":
+            response_images = extract_images_from_pdf(temp_path)
 
-        for file in files:
-            filename = file.filename
-            ext = os.path.splitext(filename)[1].lower()
-            temp_path = os.path.join(user_upload_dir, filename)
-            file.save(temp_path)
+        elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".webp"]:
+            image = Image.open(temp_path)
 
-            processed_images = []
-
-            # -----------------------------------------
-            # CASE 1: PDF EXTRACTION
-            # -----------------------------------------
-            if ext == ".pdf":
-                doc = fitz.open(temp_path)
-                for page in doc:
-                    for img in page.get_images(full=True):
-                        xref = img[0]
-                        base = doc.extract_image(xref)
-                        processed_images.append({
-                            "bytes": base["image"],
-                            "ext": base["ext"]
-                        })
-                doc.close()
-
-            # -----------------------------------------
-            # CASE 2: DIRECT IMAGE UPLOAD (Extract Figures)
-            # -----------------------------------------
-            elif ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]:
-                with open(temp_path, "rb") as f:
-                    processed_images.append({
-                        "bytes": f.read(),
-                        "ext": ext[1:] if ext != ".jpeg" else "jpg"
-                    })
-
-            # -----------------------------------------
-            # SAVE PROCESSED ASSETS
-            # -----------------------------------------
-            for item in processed_images:
+            # 🔹 OPTION: extract figures instead of whole image
+            if data := request.form.get("extract_figures"):
+                response_images = extract_figures_from_image(temp_path)
+            else:
                 img_id = str(uuid.uuid4())
-                save_ext = item["ext"]
-                
-                # Load PIL to get dimensions (Critical for layout engine)
-                try:
-                    pil_img = Image.open(io.BytesIO(item["bytes"]))
-                    
-                    # Convert specific modes like RGBA to RGB if saving as JPEG
-                    if save_ext.lower() in ['jpg', 'jpeg'] and pil_img.mode == 'RGBA':
-                        pil_img = pil_img.convert('RGB')
-                        
-                    out_path = os.path.join(user_output_dir, f"{img_id}.{save_ext}")
-                    pil_img.save(out_path)
+                save_ext = ext[1:] if ext != ".jpeg" else "jpg"
+                img_path = os.path.join(OUTPUT_FOLDER, f"{img_id}.{save_ext}")
 
-                    # Save metadata to DB
-                    images_db[sid][img_id] = {
-                        "width": pil_img.width,
-                        "height": pil_img.height,
-                        "ext": save_ext
-                    }
+                image.save(img_path)
 
-                    # Construct Response for Frontend
-                    full_url = f"{SERVER_URL}/output/{sid}/{img_id}.{save_ext}"
-                    response_data.append({
-                        "id": img_id,
-                        "width": pil_img.width,
-                        "height": pil_img.height,
-                        "url": full_url
-                    })
-                except Exception as img_err:
-                    print(f"Error processing image {img_id}: {img_err}")
-                    continue
+                images_db[img_id] = {
+                    "path": img_path,
+                    "width": image.width,
+                    "height": image.height,
+                    "ext": save_ext
+                }
 
-        return jsonify({"images": response_data})
+                response_images.append({
+    "id": img_id,
+    "width": image.width,
+    "height": image.height,
+    "ext": save_ext
+})
+
+
+
+
+        else:
+            return jsonify({"error": "Unsupported file type"}), 400
+
+        # Return list of objects so frontend knows original W/H
+        return jsonify({"images": response_images})
 
     except Exception as e:
         traceback.print_exc()
@@ -249,106 +217,163 @@ def extract_img():
 
 @app.route("/delete_image", methods=["POST"])
 def delete_image():
-    """Deletes an image from the user's session folder and DB."""
+    """
+    Deletes an image from the server and database.
+    """
     try:
-        sid = get_session_id()
         data = request.get_json()
         img_id = data.get("image_id")
 
-        if sid in images_db and img_id in images_db[sid]:
-            img_info = images_db[sid][img_id]
-            file_path = os.path.join(OUTPUT_BASE, sid, f"{img_id}.{img_info['ext']}")
-            
+        if not img_id:
+            return jsonify({"error": "Missing image_id"}), 400
+
+        # Try to find and delete file
+        if img_id in images_db:
+            file_path = images_db[img_id]["path"]
             if os.path.exists(file_path):
                 os.remove(file_path)
-            
-            del images_db[sid][img_id]
-
-        return jsonify({"status": "deleted"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/layout", methods=["POST"])
-def create_layout():
-    """Generates the A4 layout based on frontend input order and scale."""
-    try:
-        sid = get_session_id()
+            del images_db[img_id]
         
-        if sid not in images_db:
-            return jsonify({"page_count": 1, "layout": {}})
-
-        data = request.get_json()
-        items = data.get("items", []) # This list preserves the user's drag order
-        margin = data.get("margin", 40)
-        gap = data.get("gap", 20)
-
-        rectangles = []
-        user_imgs = images_db[sid]
-
-        # Prepare list for packer
-        for item in items:
-            img_id = item.get("id")
-            scale = item.get("scale", 1.0)
-            
-            if img_id not in user_imgs:
-                continue
-
-            entry = user_imgs[img_id]
-            w = int(entry["width"] * scale) + gap
-            h = int(entry["height"] * scale) + gap
-            
-            rectangles.append((w, h, img_id))
-
-        # Pack
-        packer = newPacker(
-            mode=PackingMode.Offline, 
-            pack_algo=MaxRectsBssf, 
-            rotation=False, 
-            sort_algo=SORT_NONE # Respect user order
-        )
-        packer.add_bin(A4_WIDTH - 2*margin, A4_HEIGHT - 2*margin)
-        
-        for w, h, rid in rectangles:
-            packer.add_rect(w, h, rid)
-        
-        packer.pack()
-
-        # Retry if needed (add pages)
-        if len(packer.rect_list()) < len(rectangles):
-            packer = newPacker(
-                mode=PackingMode.Offline, 
-                pack_algo=MaxRectsBssf, 
-                rotation=False, 
-                sort_algo=SORT_NONE
-            )
-            for _ in range(len(rectangles)): 
-                packer.add_bin(A4_WIDTH - 2*margin, A4_HEIGHT - 2*margin)
-            for w, h, rid in rectangles: 
-                packer.add_rect(w, h, rid)
-            packer.pack()
-
-        # Build Response
-        layout = {}
-        for bin_id, x, y, w, h, img_id in packer.rect_list():
-            if img_id in user_imgs:
-                ext = user_imgs[img_id]["ext"]
-                url = f"{SERVER_URL}/output/{sid}/{img_id}.{ext}"
-                
-                layout.setdefault(bin_id + 1, []).append({
-                    "image_id": img_id,
-                    "url": url,
-                    "x": x + margin,
-                    "y": y + margin,
-                    "width": w - gap,
-                    "height": h - gap
-                })
-
-        return jsonify({"page_count": len(layout), "layout": layout})
+        return jsonify({"message": "Deleted successfully", "id": img_id})
 
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# =========================
+# LAYOUT ALGORITHM
+# =========================
+@app.route("/layout", methods=["POST"])
+def create_layout():
+    """
+    Generates a multi-page A4 layout based on the list of items provided.
+    Respects the order of items and their scale factors.
+    """
+    try:
+        data = request.get_json()
+
+        # Input: List of { id, scale } in the desired order
+        items = data.get("items", [])
+        margin = data.get("margin", 40)
+        gap = data.get("gap", 20)
+
+        rectangles = []
+
+        # 1. Prepare Rectangles
+        # We process them in the exact order received to support "reorder" from frontend.
+        for item in items:
+            img_id = item.get("id")
+            scale = item.get("scale", 1.0)
+            
+            img_entry = images_db.get(img_id)
+            if not img_entry:
+                continue
+
+            # Calculate Scaled Dimensions
+            # Add gap to the size so the packer reserves space around it
+            # w = int(img_entry["width"] * scale) + gap
+            # h = int(img_entry["height"] * scale) + gap
+            max_h = A4_HEIGHT - 2 * margin - gap
+            scaled_w = int(img_entry["width"] * scale)
+            scaled_h = int(img_entry["height"] * scale)
+
+            if scaled_h > max_h:
+                ratio = max_h / scaled_h
+                scaled_h = max_h
+                scaled_w = int(scaled_w * ratio)
+
+            w = scaled_w + gap
+            h = scaled_h + gap
+
+            
+            rectangles.append((w, h, img_id))
+
+        # 2. Pack Rectangles
+        layout_result = pack_rectangles(
+            rectangles,
+            A4_WIDTH - 2 * margin,
+            A4_HEIGHT - 2 * margin,
+            margin,
+            gap
+        )
+
+        return jsonify({
+            "page_count": len(layout_result),
+            "layout": layout_result
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+def pack_rectangles(rectangles, bin_w, bin_h, margin, gap):
+    """
+    Uses MaxRects algorithm to pack images into A4 bins.
+    """
+    # Initialize Packer with SORT_NONE to respect user order
+    packer = newPacker(
+        mode=PackingMode.Offline,
+        pack_algo=MaxRectsBssf,
+        rotation=False,
+        sort_algo=SORT_NONE
+    )
+
+    # Start with one page
+    packer.add_bin(bin_w, bin_h)
+
+    # Add all images
+    for w, h, img_id in rectangles:
+        packer.add_rect(w, h, img_id)
+
+    packer.pack()
+
+    # If items didn't fit, add more pages and retry
+    if len(packer.rect_list()) < len(rectangles):
+        packer = newPacker(
+            mode=PackingMode.Offline,
+            pack_algo=MaxRectsBssf,
+            rotation=False,
+            sort_algo=SORT_NONE
+        )
+        # Add enough bins (worst case: 1 page per image)
+        for _ in range(len(rectangles)):
+            packer.add_bin(bin_w, bin_h)
+            
+        for w, h, img_id in rectangles:
+            packer.add_rect(w, h, img_id)
+            
+        packer.pack()
+
+    return build_layout_response(packer, margin, gap)
+
+def build_layout_response(packer, margin, gap):
+    """
+    Converts packer result into the frontend JSON format.
+    """
+    layout = {}
+
+    for bin_id, x, y, w, h, img_id in packer.rect_list():
+        img_entry = images_db.get(img_id)
+        if not img_entry:
+            continue
+            
+        # The packer returns coordinates inside the bin (excluding margins)
+        # We need to add the margins back for the final position.
+        # We also subtract the 'gap' from w/h because we added it during packing.
+        
+        layout.setdefault(bin_id + 1, []).append({
+            "image_id": img_id,
+            "x": x + margin,
+            "y": y + margin,
+            "width": w - gap,
+            "height": h - gap,
+            "url": f"http://localhost:5001/output/{img_id}.{img_entry['ext']}"
+        })
+
+    return layout
+
+# =========================
+# MAIN
+# =========================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, debug=not IS_PRODUCTION)
+    app.run(host="0.0.0.0", port=5001, debug=True)
