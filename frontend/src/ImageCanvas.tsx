@@ -8,12 +8,13 @@ import {
   Loader2,
   ZoomIn,
   ZoomOut,
-  MousePointer2,
   Layers,
   RefreshCw,
   Plus,
   X,
 } from "lucide-react";
+import BuyMeACoffee from "./BuyMeACoffee";
+import SidebarCoffeeButton from "./SidebarCoffeeButton";
 
 // ================= TYPES =================
 // type LayoutItem = {
@@ -60,7 +61,6 @@ const API_URL = "http://localhost:5001";
 const MAX_CONTENT_WIDTH = A4_WIDTH - 80;   // margin * 2
 const MAX_CONTENT_HEIGHT = A4_HEIGHT - 80;
 const HANDLE_SIZE = 10;
-const STORAGE_KEY = "smart_layout_state_v1";
 
 const getFitScale = (w: number, h: number) => {
   const scaleW = MAX_CONTENT_WIDTH / w;
@@ -586,6 +586,9 @@ setInteraction({
     <div className="flex h-screen w-full bg-zinc-100 text-zinc-900 font-sans overflow-hidden">
       {!hasContent ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8">
+          <div className="absolute top-6 right-6">
+            <BuyMeACoffee />
+          </div>
           <h1 className="text-3xl font-black mb-6 text-zinc-800">
             Smart Layout Studio
           </h1>
@@ -685,6 +688,11 @@ setInteraction({
                 </div>
               ))}
             </div>
+
+            {/* Coffee button at bottom of sidebar */}
+            <div className="p-4 border-t border-zinc-200 bg-white">
+              <SidebarCoffeeButton />
+            </div>
           </aside>
 
           {/* MAIN AREA */}
@@ -716,6 +724,7 @@ setInteraction({
                 />
               </div>
               <div className="flex gap-2">
+                <BuyMeACoffee className="mr-2" />
                 <button
                   onClick={() => {
                     setAssets([]);
