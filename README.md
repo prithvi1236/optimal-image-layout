@@ -1,227 +1,182 @@
-# Smart Layout Studio
+# Optimal Image Layout - Multi-User Application
 
-An intelligent image and PDF layout tool that automatically organizes your assets into perfectly formatted A4 sheets. Upload multiple images or PDFs, and let it handle the optimal arrangement with drag-and-drop editing capabilities.
-
-## Landing Page
-<img width="1689" height="891" alt="Image" src="https://github.com/user-attachments/assets/775d05a0-4afa-4c2b-b5ea-49a609711807" />
+A smart image layout tool that automatically arranges images and PDF extracts into optimized A4 layouts. Supports multiple concurrent users with session-based isolation.
 
 ## ✨ Features
 
-- **Smart Auto-Layout**: Utilizes the RectPack algorithm to intelligently pack items and maximize space efficiency.
-- **Multi-Format Support**: Upload JPG, PNG, PDF files simultaneously
-- **Interactive Editing**: Drag, resize, and reposition images with visual handles
-- **Real-time Preview**: See changes instantly with live canvas rendering
-- **PDF Export**: Generate professional A4 PDFs with one click
-- **Multi-Page Support**: Automatically creates additional pages when needed
-- **Responsive Design**: Modern, clean interface with zoom controls
+- **Multi-user support** with session isolation
+- **PDF image extraction** 
+- **Figure detection** from photos
+- **Smart A4 layout optimization**
+- **Real-time canvas editing**
+- **PDF export**
+- **Rate limiting** and resource management
+- **Automatic cleanup** of expired sessions
 
-## Buttons and their purposes
+## 🚀 Quick Setup
 
-- **Add Images/pdf**:Upload images or PDFs. PDF images are automatically extracted and placed intelligently.
-- **Extract Figures from Photo**:Extract diagrams and figures from inside a single photo.
-- **🗑️ Cleanup**:Clear unused pages and temporary files in the background.
+### 1. Environment Variables
+Create `.env` file in the `backend` directory:
+```bash
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_service_role_key
+```
 
-## Layout Interface 
-![Image](https://github.com/user-attachments/assets/f706e46f-07e4-46a0-b820-e522fcec40bc)
+### 2. Database Setup
+Copy and paste `backend/setup_database.sql` into your Supabase SQL editor and run it.
 
-## 🚀 Quick Start
+### 3. Storage Setup
+1. Go to Supabase Dashboard > Storage
+2. Create new bucket named `assets`
+3. Make it **public**
+4. Set file size limit to 50MB
 
-### Prerequisites
+### 4. Start Application
+```bash
+# Backend
+cd backend
+pip install -r requirements.txt
+python app.py
 
-- **Python 3.8+** (for backend)
-- **Node.js 18+** (for frontend)
-- **pip** and **npm/yarn**
+# Frontend  
+cd frontend
+npm install
+npm run dev
+```
 
-### Local Development
+### 5. Access
+- Frontend: http://localhost:5173
+- Backend: http://localhost:5001
+- Health check: http://localhost:5001/health
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd optimal-image-layout
-   ```
+## 🏗️ Architecture
 
-2. **Set up the backend**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   python app.py
-   ```
-   Backend will run on `http://localhost:5001`
+### Backend (Flask + Supabase)
+- **Session Management**: UUID-based anonymous sessions
+- **Storage**: Supabase Storage with path isolation (`anonymous/{session_id}/`)
+- **Database**: PostgreSQL with session-based data isolation
+- **Rate Limiting**: 100 requests/hour per session
+- **Resource Limits**: 100 images, 50MB files per session
 
-3. **Set up the frontend**
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   Frontend will run on `http://localhost:5173`
-
-### Production Deployment
-
-Deploy to Render.com with one click using the included configuration:
-
-1. **Push to GitHub**
-   ```bash
-   git add .
-   git commit -m "Deploy to Render"
-   git push origin main
-   ```
-
-2. **Deploy on Render**
-   - Go to [Render Dashboard](https://dashboard.render.com)
-   - Click "New" → "Blueprint"
-   - Connect your GitHub repository
-   - Render will auto-deploy both frontend and backend
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
-
-## 🛠️ Tech Stack
-
-### Backend (Python/Flask)
-- **Flask**: Web framework with CORS support
-- **Flask-CORS**: Cross-origin support
-- **OpenCV(cv2)**: Image detection & figure extraction
-- **PyMuPDF (fitz)**: PDF processing and image extraction
-- **PIL (Pillow)**: Image manipulation and processing
-- **rectpack**: Advanced rectangle packing algorithms
-- **threading**: Background cleanup and non-blocking tasks
-- **UUID**: Unique identifier generation
-
-### Frontend (React/TypeScript)
-- **React 19**: Modern UI framework with hooks
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first styling
-- **Vite**: Fast build tool and dev server
-- **Axios**: HTTP client for API communication
-- **jsPDF**: Client-side PDF generation
-- **Lucide React**: Beautiful icon library
-
-## 📋 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/` | Health check |
-| `POST` | `/extract_img` | Upload and process images/PDFs |
-| `POST` | `/layout` | Generate optimal layout |
-| `POST` | `/delete_image` | Remove image from layout |
-| `GET` | `/output/<filename>` | Serve processed images |
-
-## 🎯 How It Works
-
-1. **Upload**: Drag and drop images or PDFs into the interface
-2. **Extract**: Backend extracts images from PDFs and processes uploads
-3. **Layout**: Advanced packing algorithm arranges items optimally
-4. **Edit**: Interactive canvas allows manual adjustments
-5. **Export**: Generate final PDF with all pages
+### Frontend (React + TypeScript)
+- **Session Persistence**: localStorage-based session management
+- **Canvas Rendering**: HTML5 Canvas with real-time editing
+- **File Upload**: Drag & drop with progress indication
+- **Layout Engine**: Automatic A4 optimization
 
 ## 🔧 Configuration
 
-### Backend Settings
+### Environment Variables
+- `SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_SERVICE_KEY` - Service role key (bypasses RLS)
+- `SUPABASE_ANON_KEY` - Alternative to service key
+
+### Application Settings
 ```python
-A4_WIDTH = 794    # Canvas width in pixels
-A4_HEIGHT = 1123  # Canvas height in pixels
-MARGIN = 40       # Default page margin
-GAP = 20          # Space between images
+SESSION_TIMEOUT_HOURS = 24      # Session expiration
+MAX_IMAGES_PER_SESSION = 100    # Image limit per session  
+MAX_FILE_SIZE_MB = 50           # File size limit
+RATE_LIMIT_REQUESTS = 100       # Requests per hour per session
 ```
 
-### Frontend Settings
-```typescript
-API_URL = "http://localhost:5001"  # Backend endpoint
-HANDLE_SIZE = 10                   # Resize handle size
-DEFAULT_ZOOM = 0.6                 # Initial zoom level
-```
+## 📊 Multi-User Features
 
-## 🎨 Features in Detail
+### Session Isolation
+- Each user gets a unique session ID
+- Data completely isolated between sessions
+- Storage paths include session ID
+- Database queries filtered by session
 
-### Smart Packing Algorithm
-- Uses MaxRects Bottom-Left-Fill heuristic
-- Respects user upload order (SORT_NONE)
-- Automatically creates new pages when needed
-- Maintains aspect ratios during scaling
+### Resource Management
+- Rate limiting per session
+- File size validation
+- Image count limits
+- Automatic session cleanup
 
-### Interactive Canvas
-- Click to select images
-- Drag to reposition
-- Resize handles on corners
-- Real-time visual feedback
-- Delete button on selected items
+### Security
+- Session ID validation (UUID format)
+- Storage path isolation
+- Database RLS disabled for anonymous access
+- CORS configuration for frontend
 
-### Export Options
-- High-quality PDF generation
-- A4 format optimization
-- Multi-page support
-- Maintains image quality
+## 🛠️ Troubleshooting
 
-## 🚧 Development
+### Common Issues
 
-### Running in Development Mode
+**"Bucket not found" error**
+- Create `assets` bucket in Supabase Storage
+- Make sure it's set to public
 
-**Backend:**
-```bash
-cd backend
-python app.py  # Runs with debug=True
-```
+**"Row-level security policy violation"**
+- Run the SQL setup script
+- Or manually: `ALTER TABLE images DISABLE ROW LEVEL SECURITY;`
 
-**Frontend:**
-```bash
-cd frontend
-npm run dev    # Hot reload enabled
-```
-
-### Building for Production
-
-**Frontend:**
-```bash
-npm run build
-npm run preview
-```
+**Backend won't start**
+- Check environment variables
+- Verify Supabase credentials
+- Test with `/health` endpoint
 
 ## 📁 Project Structure
 
 ```
 optimal-image-layout/
 ├── backend/
-│   ├── app.py              # Flask application
-│   ├── uploads/            # Temporary file storage
-│   └── output/             # Processed images
+│   ├── app.py                 # Main Flask application
+│   ├── setup_database.sql     # Database setup script
+│   ├── final_fix.py          # Diagnostic tool
+│   └── requirements.txt       # Python dependencies
 ├── frontend/
 │   ├── src/
-│   │   ├── ImageCanvas.tsx # Main component
-│   │   ├── App.tsx         # Root component
-│   │   └── index.css       # Global styles
-│   ├── package.json
-│   └── vite.config.ts
-├── screenshots/            # Demo images
+│   │   ├── ImageCanvas.tsx    # Main React component
+│   │   ├── sessionManager.ts  # Session management
+│   │   └── ...
+│   └── package.json
 └── README.md
 ```
+
+## 🔄 Session Lifecycle
+
+1. **Session Creation**: Frontend requests session ID from backend
+2. **Storage**: Session ID stored in localStorage
+3. **API Calls**: All requests include `X-Session-Id` header
+4. **Data Isolation**: Backend filters all operations by session
+5. **Cleanup**: Sessions expire after 24 hours
+
+## 🚀 Production Deployment
+
+### Backend
+- Use production WSGI server (gunicorn/uvicorn)
+- Set up proper environment variables
+- Configure session cleanup cron job
+- Monitor rate limits and resource usage
+
+### Frontend
+- Build for production: `npm run build`
+- Serve static files
+- Configure proper CORS origins
+
+### Database
+- Regular cleanup of expired sessions
+- Monitor storage usage
+- Set up backup strategy
+
+## 📈 Monitoring
+
+Key metrics to track:
+- Active sessions count
+- Storage usage per session
+- Rate limit violations
+- Session creation rate
+- Image processing time
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create feature branch
+3. Make changes
+4. Test thoroughly
+5. Submit pull request
 
-## 📝 License
+## 📄 License
 
-This project is open source and available under the [MIT License](LICENSE).
-
-## 🐛 Known Issues
-
-- Large PDF files may take time to process
-- Canvas performance may vary with many images
-- Mobile responsiveness needs improvement
-
-## 🔮 Future Enhancements
-
-- [ ] Cloud storage integration
-- [ ] Batch processing capabilities
-- [ ] Custom page sizes beyond A4
-- [ ] Advanced image filters
-- [ ] Collaborative editing
-- [ ] Template system
-
----
-
-**Made with ❤️ using React, Flask, and modern web technologies**
+MIT License - see LICENSE file for details.
