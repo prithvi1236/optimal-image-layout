@@ -151,7 +151,7 @@ def home():
 
 @app.route("/output/<filename>")
 def get_image(filename):
-    """Serves the static image files."""
+    """Serves the  image files."""
     return send_from_directory(OUTPUT_FOLDER, filename)
 
 @app.route("/extract_img", methods=["POST"])
@@ -260,7 +260,7 @@ def create_layout():
         rectangles = []
 
         # 1. Prepare Rectangles
-        # We process them in the exact order received to support "reorder" from frontend.
+        # We process them in the exact order received to support "reorder" 
         for item in items:
             img_id = item.get("id")
             scale = item.get("scale", 1.0)
