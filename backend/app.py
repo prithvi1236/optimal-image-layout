@@ -195,7 +195,20 @@ def get_session_image_count(session_id: str) -> int:
             .eq("session_id", session_id)
             .execute()
         )
-        return res.count or 0
+        # supabase-py response shapes vary by version; don't assume `.count` exists.
+        count = getattr(res, "count", None)
+        if isinstance(res, dict):
+            count = res.get("count")
+
+        if isinstance(count, int):
+            return count
+        # Some versions may only return data; fall back to len(data) (not exact if paginated)
+        data = getattr(res, "data", None)
+        if isinstance(res, dict):
+            data = res.get("data")
+        if isinstance(data, list):
+            return len(data)
+        return 0
     except Exception:
         return 0
 
@@ -323,9 +336,26 @@ def get_public_url_from_storage(path: str) -> str:
     For simplicity, this uses public URLs; you can switch to signed URLs.
     """
     # Public URL (bucket must be public or served via CDN).
-    # supabase-py: get_public_url
-    url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(path)
-    return url
+    # supabase-py return shape can vary by version, so normalize to a plain string.
+    res = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(path)
+
+    # Common shapes:
+    #  - str
+    #  - {"publicUrl": "..."}
+    #  - {"data": {"publicUrl": "..."}, "error": None}
+    if isinstance(res, str):
+        return res
+
+    if isinstance(res, dict):
+        # Newer SDK shape
+        if "data" in res and isinstance(res["data"], dict) and res["data"].get("publicUrl"):
+            return res["data"]["publicUrl"]
+        # Older helper shape
+        if res.get("publicUrl"):
+            return res["publicUrl"]
+
+    # Fallback to string conversion (at worst returns repr so caller doesn't crash)
+    return str(res)
 
 # =========================
 # HELPER: DATABASE ACCESSORS
@@ -382,9 +412,19 @@ def db_get_image(img_id: str, session_id: str):
         .single()
         .execute()
     )
-    if res.error:
+    # supabase-py response shapes vary by version; avoid assuming `.error` exists.
+    # We treat "no row" as None, and bubble up real exceptions.
+    data = getattr(res, "data", None)
+    error = getattr(res, "error", None)
+
+    # Some versions may return dicts
+    if isinstance(res, dict):
+        data = res.get("data")
+        error = res.get("error")
+
+    if error:
         return None
-    return res.data
+    return data
 
 
 def db_delete_image(img_id: str, session_id: str):
@@ -405,8 +445,12 @@ def db_delete_image(img_id: str, session_id: str):
         .eq("session_id", session_id)
         .execute()
     )
-    if res.error:
-        raise RuntimeError(f"Supabase delete error: {res.error}")
+    # supabase-py response shapes vary by version; avoid assuming `.error` exists.
+    error = getattr(res, "error", None)
+    if isinstance(res, dict):
+        error = res.get("error")
+    if error:
+        raise RuntimeError(f"Supabase delete error: {error}")
 
     return path
 
