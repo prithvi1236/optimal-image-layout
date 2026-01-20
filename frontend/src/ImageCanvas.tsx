@@ -8,12 +8,14 @@ import {
   Loader2,
   ZoomIn,
   ZoomOut,
-  MousePointer2,
   Layers,
   RefreshCw,
   Plus,
   X,
 } from "lucide-react";
+import BuyMeACoffee from "./BuyMeACoffee";
+import SidebarCoffeeButton from "./SidebarCoffeeButton";
+import { sessionManager } from "./sessionManager";
 
 // ================= TYPES =================
 // type LayoutItem = {
@@ -60,7 +62,6 @@ const API_URL = "http://localhost:5001";
 const MAX_CONTENT_WIDTH = A4_WIDTH - 80;   // margin * 2
 const MAX_CONTENT_HEIGHT = A4_HEIGHT - 80;
 const HANDLE_SIZE = 10;
-const STORAGE_KEY = "smart_layout_state_v1";
 
 const getFitScale = (w: number, h: number) => {
   const scaleW = MAX_CONTENT_WIDTH / w;
@@ -76,6 +77,11 @@ const ImageCanvasStudio: React.FC = () => {
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
+  const [sessionInfo, setSessionInfo] = useState<{
+    image_count: number;
+    max_images: number;
+    remaining_images: number;
+  } | null>(null);
 
   // Interaction
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
@@ -85,6 +91,31 @@ const ImageCanvasStudio: React.FC = () => {
   const [activePageIndex, setActivePageIndex] = useState(1);
 
   const hasContent = assets.length > 0;
+
+  // ================= SESSION MANAGEMENT =================
+  
+  useEffect(() => {
+    // Initialize session and load session info
+    const initSession = async () => {
+      try {
+        const info = await sessionManager.getSessionInfo();
+        setSessionInfo(info);
+      } catch (error) {
+        console.error('Failed to initialize session:', error);
+      }
+    };
+    
+    initSession();
+  }, []);
+
+  const updateSessionInfo = async () => {
+    try {
+      const info = await sessionManager.getSessionInfo();
+      setSessionInfo(info);
+    } catch (error) {
+      console.error('Failed to update session info:', error);
+    }
+  };
 
   // ================= API =================
 
@@ -101,10 +132,14 @@ const ImageCanvasStudio: React.FC = () => {
         id: a.id,
         scale: a.scale,
       }));
+      
+      const headers = await sessionManager.getSessionHeaders();
       const response = await axios.post(`${API_URL}/layout`, {
         items: payloadItems,
         margin: 40,
         gap: 20,
+      }, {
+        headers
       });
 
       const newLayout: LayoutItem[] = [];
@@ -112,8 +147,8 @@ const ImageCanvasStudio: React.FC = () => {
         items.forEach((it: any) => {
           newLayout.push({
             layoutId: `${it.image_id}-${page}-${Math.random()}`,
-  imageId: it.image_id,
-  url: it.url,
+            imageId: it.image_id,
+            url: it.url,
             x: it.x,
             y: it.y,
             width: it.width,
@@ -126,6 +161,9 @@ const ImageCanvasStudio: React.FC = () => {
       setPageCount(response.data.page_count || 1);
     } catch (err) {
       console.error(err);
+      if (axios.isAxiosError(err) && err.response?.status === 400) {
+        alert(err.response.data.error || 'Session error occurred');
+      }
     } finally {
       setLoading(false);
     }
@@ -153,27 +191,36 @@ const ImageCanvasStudio: React.FC = () => {
   // };
 
   const handleDelete = async (imageIdToDelete: string) => {
-  if (!imageIdToDelete) return;
+    if (!imageIdToDelete) return;
 
-  // Remove asset
-  const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
-  setAssets(updatedAssets);
+    // Remove asset
+    const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
+    setAssets(updatedAssets);
 
-  // Clear selection
-  setSelectedLayoutId(null);
+    // Clear selection
+    setSelectedLayoutId(null);
 
-  // Reflow layout
-  generateLayout(updatedAssets);
+    // Reflow layout
+    generateLayout(updatedAssets);
 
-  // Backend delete
-  try {
-    await axios.post(`${API_URL}/delete_image`, {
-      image_id: imageIdToDelete,
-    });
-  } catch (err) {
-    console.error("Failed to delete on server", err);
-  }
-};
+    // Backend delete
+    try {
+      const headers = await sessionManager.getSessionHeaders();
+      await axios.post(`${API_URL}/delete_image`, {
+        image_id: imageIdToDelete,
+      }, {
+        headers
+      });
+      
+      // Update session info
+      await updateSessionInfo();
+    } catch (err) {
+      console.error("Failed to delete on server", err);
+      if (axios.isAxiosError(err) && err.response?.status === 400) {
+        alert(err.response.data.error || 'Session error occurred');
+      }
+    }
+  };
 
 
   const MARGIN = 40;
@@ -194,39 +241,45 @@ const getLastPageCursor = (page: number) => {
   setLoading(true);
 
   try {
+    // Check session limits before upload
+    if (sessionInfo && sessionInfo.remaining_images <= 0) {
+      alert(`Maximum ${sessionInfo.max_images} images per session reached`);
+      setLoading(false);
+      return;
+    }
+
     const fd = new FormData();
     fd.append("file", uploadedFile);
     if (extractFigures) fd.append("extract_figures", "1");
 
-    const res = await axios.post(`${API_URL}/extract_img`, fd);
+    const headers = await sessionManager.getSessionHeaders();
+    const res = await axios.post(`${API_URL}/extract_img`, fd, {
+      headers: {
+        ...headers,
+        // Don't set Content-Type for FormData, let axios handle it
+      }
+    });
 
-    // const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
-    //   id: img.id,
-    //   // url: `${API_URL}/output/${img.id}.png`,
-    //   url: `${API_URL}/output/${img.id}.${img.ext}`,
-
-    //   scale: getFitScale(img.width, img.height),
-    //   origW: img.width,
-    //   origH: img.height,
-    // }));
     const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
-  id: img.id,
-  url: `${API_URL}/output/${img.id}.${img.ext}`,
-  scale: getFitScale(img.width, img.height),
-  origW: img.width,
-  origH: img.height,
-}));
+      id: img.id,
+      url: img.url, // Backend now returns full URLs
+      scale: getFitScale(img.width, img.height),
+      origW: img.width,
+      origH: img.height,
+    }));
 
     /* ============================
        FIRST UPLOAD → FULL LAYOUT
        ============================ */
     if (assets.length === 0) {
-  const updated = [...newAssets];
-  setAssets(updated);
-  setTimeout(() => generateLayout(updated), 0);
-  return;
-}
-
+      const updated = [...newAssets];
+      setAssets(updated);
+      setTimeout(() => generateLayout(updated), 0);
+      
+      // Update session info
+      await updateSessionInfo();
+      return;
+    }
 
     /* ============================
        SUBSEQUENT UPLOAD → APPEND
@@ -246,16 +299,15 @@ const getLastPageCursor = (page: number) => {
       }
 
       appendedLayouts.push({
-  layoutId: `${asset.id}-${currentPage}-${Math.random()}`,
-  imageId: asset.id,
-  url: asset.url,
-  x: MARGIN,
-  y: cursorY,
-  width: scaledW,
-  height: scaledH,
-  page: currentPage,
-});
-
+        layoutId: `${asset.id}-${currentPage}-${Math.random()}`,
+        imageId: asset.id,
+        url: asset.url,
+        x: MARGIN,
+        y: cursorY,
+        width: scaledW,
+        height: scaledH,
+        page: currentPage,
+      });
 
       cursorY += scaledH + GAP;
     });
@@ -263,8 +315,17 @@ const getLastPageCursor = (page: number) => {
     setAssets((prev) => [...prev, ...newAssets]);
     setLayoutImages((prev) => [...prev, ...appendedLayouts]);
     setPageCount((prev) => Math.max(prev, currentPage));
+    
+    // Update session info
+    await updateSessionInfo();
+    
+    // Show success feedback
+    alert(`Successfully uploaded ${newAssets.length} image(s)! They've been added to your canvas.`);
   } catch (err) {
     console.error(err);
+    if (axios.isAxiosError(err) && err.response?.status === 400) {
+      alert(err.response.data.error || 'Upload failed');
+    }
   } finally {
     setLoading(false);
   }
@@ -586,6 +647,9 @@ setInteraction({
     <div className="flex h-screen w-full bg-zinc-100 text-zinc-900 font-sans overflow-hidden">
       {!hasContent ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8">
+          <div className="absolute top-6 right-6">
+            <BuyMeACoffee />
+          </div>
           <h1 className="text-3xl font-black mb-6 text-zinc-800">
             Smart Layout Studio
           </h1>
@@ -633,19 +697,35 @@ setInteraction({
                   }
                 />
               </div>
-              <div className="p-4 border-b border-zinc-100 bg-white z-10">
-  <div className="relative w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 py-2.5 rounded-lg border border-emerald-200 cursor-pointer transition-all">
-    Extract Figures from Photo
-    <input
-      type="file"
-      className="absolute inset-0 opacity-0 cursor-pointer"
-      onChange={(e) =>
-        e.target.files && handleUpload(e.target.files[0], true)
-      }
-    />
-  </div>
-</div>
-
+              
+              <div className="mt-2 relative w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 py-2.5 rounded-lg border border-emerald-200 cursor-pointer transition-all">
+                Extract Figures from Photo
+                <input
+                  type="file"
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                  onChange={(e) =>
+                    e.target.files && handleUpload(e.target.files[0], true)
+                  }
+                />
+              </div>
+              
+              {/* Session Info */}
+              {sessionInfo && (
+                <div className="mt-3 p-2 bg-zinc-50 rounded-lg border border-zinc-200">
+                  <div className="text-xs text-zinc-600">
+                    <div className="flex justify-between">
+                      <span>Images:</span>
+                      <span className="font-mono">{sessionInfo.image_count}/{sessionInfo.max_images}</span>
+                    </div>
+                    <div className="w-full bg-zinc-200 rounded-full h-1.5 mt-1">
+                      <div 
+                        className="bg-indigo-600 h-1.5 rounded-full transition-all"
+                        style={{ width: `${(sessionInfo.image_count / sessionInfo.max_images) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
@@ -685,6 +765,11 @@ setInteraction({
                 </div>
               ))}
             </div>
+
+            {/* Coffee button at bottom of sidebar */}
+            <div className="p-4 border-t border-zinc-200 bg-white">
+              <SidebarCoffeeButton />
+            </div>
           </aside>
 
           {/* MAIN AREA */}
@@ -716,12 +801,17 @@ setInteraction({
                 />
               </div>
               <div className="flex gap-2">
+                <BuyMeACoffee className="mr-2" />
                 <button
                   onClick={() => {
                     setAssets([]);
                     setPageCount(1);
+                    setLayoutImages([]);
+                    setSessionInfo(null);
+                    sessionManager.clearSession();
                   }}
                   className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
+                  title="Clear All & Reset Session"
                 >
                   <Trash2 size={18} />
                 </button>
