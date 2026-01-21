@@ -68,6 +68,37 @@ def db_delete_image(img_id, user_id):
     supabase.table("images").delete().eq("id", img_id).eq("user_id", user_id).execute()
     return img["storage_path"]
 
+def extract_images_from_pdf(pdf_path, user_id):
+    """Extracts all images and ensures they are indexed in Supabase."""
+    doc = fitz.open(pdf_path)
+    extracted_images = []
+    
+    for page in doc:
+        for img_info in page.get_images(full=True):
+            xref = img_info[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            ext = base_image["ext"]
+            
+            img_id = str(uuid.uuid4())
+            # Use PIL to get dimensions safely
+            with Image.open(io.BytesIO(image_bytes)) as img_obj:
+                w, h = img_obj.size
+            
+            # Upload to Supabase Storage
+            path = upload_to_supabase(user_id, img_id, ext, image_bytes)
+            # Insert to Supabase DB
+            db_insert_image(img_id, user_id, path, w, h, ext)
+            
+            extracted_images.append({
+                "id": img_id,
+                "url": get_url(path),
+                "width": w,
+                "height": h
+            })
+    doc.close()
+    return extracted_images
+
 # --- ROUTES ---
 @app.route("/extract_img", methods=["POST"])
 def extract_img():
@@ -183,23 +214,45 @@ def extract_figures_from_image(image_path, user_id):
 
     return extracted_list
 
+# --- OPTIMIZED LAYOUT ENGINE ---
 @app.route("/layout", methods=["POST"])
 def create_layout():
     user_id = get_user_id_from_auth()
     if not user_id: return jsonify({"error": "Unauthorized"}), 401
+    
     data = request.get_json()
     items, margin, gap = data.get("items", []), data.get("margin", 40), data.get("gap", 20)
     
+    # Calculate printable area
+    max_w, max_h = A4_WIDTH - 2*margin, A4_HEIGHT - 2*margin
     rects = []
+
     for it in items:
         img = db_get_image(it["id"], user_id)
         if img:
-            rects.append((int(img["width"] * it["scale"]) + gap, int(img["height"] * it["scale"]) + gap, it["id"]))
+            w = int(img["width"] * it["scale"])
+            h = int(img["height"] * it["scale"])
+            
+            # AUTO-SCALE: Ensure single images aren't larger than the page
+            if h > (max_h - gap):
+                ratio = (max_h - gap) / h
+                h = max_h - gap
+                w = int(w * ratio)
+
+            rects.append((w + gap, h + gap, it["id"]))
+
+    # STABILITY FIX: Sorting by height descending makes packing much tighter
+    rects.sort(key=lambda x: x[1], reverse=True)
 
     packer = newPacker(mode=PackingMode.Offline, pack_algo=MaxRectsBssf, sort_algo=SORT_NONE)
-    packer.add_bin(A4_WIDTH - 2*margin, A4_HEIGHT - 2*margin)
+    packer.add_bin(max_w, max_h)
     for r in rects: packer.add_rect(*r)
     packer.pack()
+
+    # Fallback: If some didn't fit, add more bins
+    if len(packer.rect_list()) < len(rects):
+        for _ in range(len(rects)): packer.add_bin(max_w, max_h)
+        packer.pack()
 
     res_layout = {}
     for b, x, y, w, h, rid in packer.rect_list():
