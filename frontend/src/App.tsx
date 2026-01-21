@@ -1,22 +1,13 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import ImageCanvasStudio from "./ImageCanvas";
-import Login from "./Components/Login";
+import ImageCanvasStudio from "./ImageCanvas"; // Ensure this path matches where you saved the previous code
 
-export default function App() {
+function App() {
   return (
-    <BrowserRouter>
-      <div className="w-screen h-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden">
-        <Routes>
-          {/* Redirect root to login */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          
-          <Route path="/login" element={<Login />} />
-          
-          {/* Ensure this matches your login navigate("/studio") */}
-          <Route path="/studio" element={<ImageCanvasStudio />} />
-        </Routes>
-      </div>
-    </BrowserRouter>
+    // Force full viewport height and width, set base background and font
+    <div className="w-screen h-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden selection:bg-indigo-100 selection:text-indigo-700">
+      <ImageCanvasStudio />
+    </div>
   );
 }
+
+export default App;

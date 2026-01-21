@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { jsPDF } from "jspdf";
-import { supabase } from "./Components/supabaseClient";
 import {
   Upload,
   Download,
@@ -16,8 +15,18 @@ import {
 } from "lucide-react";
 import BuyMeACoffee from "./BuyMeACoffee";
 import SidebarCoffeeButton from "./SidebarCoffeeButton";
-// import { sessionManager } from "./sessionManager";
+import { sessionManager } from "./sessionManager";
 
+// ================= TYPES =================
+// type LayoutItem = {
+//   id: string;
+//   url: string;
+//   x: number;
+//   y: number;
+//   width: number;
+//   height: number;
+//   page: number;
+// };
 
 type LayoutItem = {
   layoutId: string; // ✅ unique per layout instance
@@ -68,11 +77,11 @@ const ImageCanvasStudio: React.FC = () => {
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
-  // const [sessionInfo, setSessionInfo] = useState<{
-  //   image_count: number;
-  //   max_images: number;
-  //   remaining_images: number;
-  // } | null>(null);
+  const [sessionInfo, setSessionInfo] = useState<{
+    image_count: number;
+    max_images: number;
+    remaining_images: number;
+  } | null>(null);
 
   // Interaction
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
@@ -85,80 +94,80 @@ const ImageCanvasStudio: React.FC = () => {
 
   // ================= SESSION MANAGEMENT =================
   
-  // useEffect(() => {
-  //   // Initialize session and load session info
-  //   const initSession = async () => {
-  //     try {
-  //       const info = await sessionManager.getSessionInfo();
-  //       setSessionInfo(info);
-  //     } catch (error) {
-  //       console.error('Failed to initialize session:', error);
-  //     }
-  //   };
+  useEffect(() => {
+    // Initialize session and load session info
+    const initSession = async () => {
+      try {
+        const info = await sessionManager.getSessionInfo();
+        setSessionInfo(info);
+      } catch (error) {
+        console.error('Failed to initialize session:', error);
+      }
+    };
     
-  //   initSession();
-  // }, []);
+    initSession();
+  }, []);
 
-  // const updateSessionInfo = async () => {
-  //   try {
-  //     const info = await sessionManager.getSessionInfo();
-  //     setSessionInfo(info);
-  //   } catch (error) {
-  //     console.error('Failed to update session info:', error);
-  //   }
-  // };
+  const updateSessionInfo = async () => {
+    try {
+      const info = await sessionManager.getSessionInfo();
+      setSessionInfo(info);
+    } catch (error) {
+      console.error('Failed to update session info:', error);
+    }
+  };
 
   // ================= API =================
 
   // 1. GENERATE LAYOUT
- const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
-  if (currentAssets.length === 0) {
-    setLayoutImages([]);
-    setPageCount(1);
-    return;
-  }
+  const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
+    if (currentAssets.length === 0) {
+      setLayoutImages([]);
+      setPageCount(1);
+      return;
+    }
+    setLoading(true);
+    try {
+      const payloadItems = currentAssets.map((a) => ({
+        id: a.id,
+        scale: a.scale,
+      }));
+      
+      const headers = await sessionManager.getSessionHeaders();
+      const response = await axios.post(`${API_URL}/layout`, {
+        items: payloadItems,
+        margin: 40,
+        gap: 20,
+      }, {
+        headers
+      });
 
-  setLoading(true);
-  try {
-    const payloadItems = currentAssets.map((a) => ({
-      id: a.id,
-      scale: a.scale,
-    }));
-
-    // 1. Get Token
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-
-    // 2. Post to /layout with Auth header
-    const response = await axios.post(`${API_URL}/layout`, 
-      { items: payloadItems, margin: 40, gap: 20 },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    const newLayout: LayoutItem[] = [];
-    Object.entries(response.data.layout).forEach(([page, items]: any) => {
-      items.forEach((it: any) => {
-        newLayout.push({
-          layoutId: `${it.image_id}-${page}-${Math.random()}`,
-          imageId: it.image_id,
-          url: it.url,
-          x: it.x,
-          y: it.y,
-          width: it.width,
-          height: it.height,
-          page: Number(page),
+      const newLayout: LayoutItem[] = [];
+      Object.entries(response.data.layout).forEach(([page, items]: any) => {
+        items.forEach((it: any) => {
+          newLayout.push({
+            layoutId: `${it.image_id}-${page}-${Math.random()}`,
+            imageId: it.image_id,
+            url: it.url,
+            x: it.x,
+            y: it.y,
+            width: it.width,
+            height: it.height,
+            page: Number(page),
+          });
         });
       });
-    });
-
-    setLayoutImages(newLayout);
-    setPageCount(response.data.page_count || 1);
-  } catch (err) {
-    console.error("Layout error:", err);
-  } finally {
-    setLoading(false);
-  }
-}, []);
+      setLayoutImages(newLayout);
+      setPageCount(response.data.page_count || 1);
+    } catch (err) {
+      console.error(err);
+      if (axios.isAxiosError(err) && err.response?.status === 400) {
+        alert(err.response.data.error || 'Session error occurred');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // 2. DELETE IMAGE (Frontend + Backend)
   // const handleDelete = async (idToDelete: string) => {
@@ -182,29 +191,36 @@ const ImageCanvasStudio: React.FC = () => {
   // };
 
   const handleDelete = async (imageIdToDelete: string) => {
-  if (!imageIdToDelete) return;
+    if (!imageIdToDelete) return;
 
-  // 1. UI Updates (Optimistic)
-  const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
-  setAssets(updatedAssets);
-  setSelectedLayoutId(null);
-  generateLayout(updatedAssets);
+    // Remove asset
+    const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
+    setAssets(updatedAssets);
 
-  // 2. Backend Delete
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
+    // Clear selection
+    setSelectedLayoutId(null);
 
-    await axios.post(`${API_URL}/delete_image`, 
-      { image_id: imageIdToDelete },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    
-  } catch (err) {
-    console.error("Failed to delete image on server:", err);
-    alert("Could not delete the image from the server. It might already be gone.");
-  }
-};
+    // Reflow layout
+    generateLayout(updatedAssets);
+
+    // Backend delete
+    try {
+      const headers = await sessionManager.getSessionHeaders();
+      await axios.post(`${API_URL}/delete_image`, {
+        image_id: imageIdToDelete,
+      }, {
+        headers
+      });
+      
+      // Update session info
+      await updateSessionInfo();
+    } catch (err) {
+      console.error("Failed to delete on server", err);
+      if (axios.isAxiosError(err) && err.response?.status === 400) {
+        alert(err.response.data.error || 'Session error occurred');
+      }
+    }
+  };
 
 
   const MARGIN = 40;
@@ -221,49 +237,56 @@ const getLastPageCursor = (page: number) => {
 
 
   // 3. UPLOAD
-const handleUpload = async (uploadedFile: File, extractFigures = false) => {
+ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
   setLoading(true);
 
   try {
+    // Check session limits before upload
+    if (sessionInfo && sessionInfo.remaining_images <= 0) {
+      alert(`Maximum ${sessionInfo.max_images} images per session reached`);
+      setLoading(false);
+      return;
+    }
+
     const fd = new FormData();
     fd.append("file", uploadedFile);
     if (extractFigures) fd.append("extract_figures", "1");
 
-    // 1. Get the current Supabase token
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-
-    if (!token) {
-      alert("You must be logged in to upload images.");
-      return;
-    }
-
-    // 2. Send request with Authorization header
+    const headers = await sessionManager.getSessionHeaders();
     const res = await axios.post(`${API_URL}/extract_img`, fd, {
       headers: {
-        Authorization: `Bearer ${token}`,
-        // Note: Do not set Content-Type, axios does it for FormData
-      },
+        ...headers,
+        // Don't set Content-Type for FormData, let axios handle it
+      }
     });
 
     const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
       id: img.id,
-      url: img.url, 
+      url: img.url, // Backend now returns full URLs
       scale: getFitScale(img.width, img.height),
       origW: img.width,
       origH: img.height,
     }));
 
-    // Logic remains: If first upload, generate full layout. Otherwise, append.
+    /* ============================
+       FIRST UPLOAD → FULL LAYOUT
+       ============================ */
     if (assets.length === 0) {
       const updated = [...newAssets];
       setAssets(updated);
       setTimeout(() => generateLayout(updated), 0);
+      
+      // Update session info
+      await updateSessionInfo();
       return;
     }
 
+    /* ============================
+       SUBSEQUENT UPLOAD → APPEND
+       ============================ */
     let currentPage = pageCount;
     let cursorY = getLastPageCursor(currentPage);
+
     const appendedLayouts: LayoutItem[] = [];
 
     newAssets.forEach((asset) => {
@@ -293,10 +316,16 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
     setLayoutImages((prev) => [...prev, ...appendedLayouts]);
     setPageCount((prev) => Math.max(prev, currentPage));
     
-    alert(`Successfully added ${newAssets.length} image(s) to your account.`);
+    // Update session info
+    await updateSessionInfo();
+    
+    // Show success feedback
+    alert(`Successfully uploaded ${newAssets.length} image(s)! They've been added to your canvas.`);
   } catch (err) {
-    console.error("Upload error:", err);
-    alert("Upload failed. Please check your connection or login status.");
+    console.error(err);
+    if (axios.isAxiosError(err) && err.response?.status === 400) {
+      alert(err.response.data.error || 'Upload failed');
+    }
   } finally {
     setLoading(false);
   }
@@ -681,7 +710,7 @@ setInteraction({
               </div>
               
               {/* Session Info */}
-              {/* {sessionInfo && (
+              {sessionInfo && (
                 <div className="mt-3 p-2 bg-zinc-50 rounded-lg border border-zinc-200">
                   <div className="text-xs text-zinc-600">
                     <div className="flex justify-between">
@@ -696,7 +725,7 @@ setInteraction({
                     </div>
                   </div>
                 </div>
-              )} */}
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
@@ -778,8 +807,8 @@ setInteraction({
                     setAssets([]);
                     setPageCount(1);
                     setLayoutImages([]);
-                    // setSessionInfo(null);
-                    // sessionManager.clearSession();
+                    setSessionInfo(null);
+                    sessionManager.clearSession();
                   }}
                   className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
                   title="Clear All & Reset Session"
