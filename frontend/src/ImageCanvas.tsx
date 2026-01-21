@@ -65,6 +65,7 @@ const ImageCanvasStudio: React.FC = () => {
   const [layoutImages, setLayoutImages] = useState<LayoutItem[]>([]);
   const [pageCount, setPageCount] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [isReflowing, setIsReflowing] = useState(false);
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
@@ -184,25 +185,29 @@ const ImageCanvasStudio: React.FC = () => {
   const handleDelete = async (imageIdToDelete: string) => {
   if (!imageIdToDelete) return;
 
-  // 1. UI Updates (Optimistic)
+  // Optimistic UI Removal
   const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
   setAssets(updatedAssets);
+  setLayoutImages(prev => prev.filter(li => li.imageId !== imageIdToDelete));
   setSelectedLayoutId(null);
-  generateLayout(updatedAssets);
 
-  // 2. Backend Delete
+  setIsReflowing(true);
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
 
+    // Wait for server to delete
     await axios.post(`${API_URL}/delete_image`, 
       { image_id: imageIdToDelete },
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    
+
+    // Trigger optimized reflow for remaining items
+    await generateLayout(updatedAssets);
   } catch (err) {
-    console.error("Failed to delete image on server:", err);
-    alert("Could not delete the image from the server. It might already be gone.");
+    console.error("Deletion sync error:", err);
+  } finally {
+    setIsReflowing(false);
   }
 };
 
@@ -223,27 +228,16 @@ const getLastPageCursor = (page: number) => {
   // 3. UPLOAD
 const handleUpload = async (uploadedFile: File, extractFigures = false) => {
   setLoading(true);
-
   try {
     const fd = new FormData();
     fd.append("file", uploadedFile);
     if (extractFigures) fd.append("extract_figures", "1");
 
-    // 1. Get the current Supabase token
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
 
-    if (!token) {
-      alert("You must be logged in to upload images.");
-      return;
-    }
-
-    // 2. Send request with Authorization header
     const res = await axios.post(`${API_URL}/extract_img`, fd, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        // Note: Do not set Content-Type, axios does it for FormData
-      },
+      headers: { Authorization: `Bearer ${token}` }
     });
 
     const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
@@ -254,49 +248,13 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
       origH: img.height,
     }));
 
-    // Logic remains: If first upload, generate full layout. Otherwise, append.
-    if (assets.length === 0) {
-      const updated = [...newAssets];
-      setAssets(updated);
-      setTimeout(() => generateLayout(updated), 0);
-      return;
-    }
-
-    let currentPage = pageCount;
-    let cursorY = getLastPageCursor(currentPage);
-    const appendedLayouts: LayoutItem[] = [];
-
-    newAssets.forEach((asset) => {
-      const scaledW = asset.origW * asset.scale;
-      const scaledH = asset.origH * asset.scale;
-
-      if (cursorY + scaledH > A4_HEIGHT - MARGIN) {
-        currentPage += 1;
-        cursorY = MARGIN;
-      }
-
-      appendedLayouts.push({
-        layoutId: `${asset.id}-${currentPage}-${Math.random()}`,
-        imageId: asset.id,
-        url: asset.url,
-        x: MARGIN,
-        y: cursorY,
-        width: scaledW,
-        height: scaledH,
-        page: currentPage,
-      });
-
-      cursorY += scaledH + GAP;
-    });
-
-    setAssets((prev) => [...prev, ...newAssets]);
-    setLayoutImages((prev) => [...prev, ...appendedLayouts]);
-    setPageCount((prev) => Math.max(prev, currentPage));
+    const updatedAll = [...assets, ...newAssets];
+    setAssets(updatedAll);
     
-    alert(`Successfully added ${newAssets.length} image(s) to your account.`);
+    // Always let the server decide the layout for the whole batch
+    await generateLayout(updatedAll);
   } catch (err) {
     console.error("Upload error:", err);
-    alert("Upload failed. Please check your connection or login status.");
   } finally {
     setLoading(false);
   }
@@ -409,30 +367,31 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
 
         if (im) ctx.drawImage(im, img.x, img.y, img.width, img.height);
 
-        if (selectedLayoutId === img.layoutId) {
-          ctx.strokeStyle = "#4f46e5";
-          ctx.lineWidth = 2;
-          ctx.strokeRect(img.x, img.y, img.width, img.height);
+        // Inside PageCanvas render loop
+if (selectedLayoutId === img.layoutId) {
+    ctx.strokeStyle = "#4f46e5";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(img.x, img.y, img.width, img.height);
 
-          ctx.fillStyle = "#ffffff";
-          const handles = [
-            { x: img.x, y: img.y },
-            { x: img.x + img.width, y: img.y },
-            { x: img.x, y: img.y + img.height },
-            { x: img.x + img.width, y: img.y + img.height },
-          ];
-          handles.forEach((h) => {
-            ctx.beginPath();
-            ctx.rect(
-              h.x - HANDLE_SIZE / 2,
-              h.y - HANDLE_SIZE / 2,
-              HANDLE_SIZE,
-              HANDLE_SIZE
-            );
-            ctx.fill();
-            ctx.stroke();
-          });
-        }
+    ctx.fillStyle = "#ffffff";
+    const handles = [
+        { x: img.x, y: img.y, type: "nw" },             // Top Left
+        { x: img.x + img.width / 2, y: img.y, type: "n" }, // Top Center
+        { x: img.x + img.width, y: img.y, type: "ne" },    // Top Right
+        { x: img.x, y: img.y + img.height / 2, type: "w" }, // Mid Left
+        { x: img.x + img.width, y: img.y + img.height / 2, type: "e" }, // Mid Right
+        { x: img.x, y: img.y + img.height, type: "sw" },    // Bottom Left
+        { x: img.x + img.width / 2, y: img.y + img.height, type: "s" }, // Bottom Center
+        { x: img.x + img.width, y: img.y + img.height, type: "se" },    // Bottom Right
+    ];
+    
+    handles.forEach((h) => {
+        ctx.beginPath();
+        ctx.rect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+        ctx.fill();
+        ctx.stroke();
+    });
+}
       });
     }, [pageItems, loadedImages, selectedLayoutId]);
 
@@ -445,62 +404,57 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
       };
     };
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-      const { x, y } = getMousePos(e);
-      let clickedItem = null;
-      let handleType = null;
+   const handleMouseDown = (e: React.MouseEvent) => {
+    const { x, y } = getMousePos(e);
+    let handleType: string | null = null;
+    let clickedItem: LayoutItem | null = null;
+    const hw = HANDLE_SIZE + 5;
 
-      for (let i = pageItems.length - 1; i >= 0; i--) {
-        const img = pageItems[i];
-        if (selectedLayoutId === img.layoutId) {
-          const hw = HANDLE_SIZE + 5;
-          if (Math.abs(x - img.x) < hw && Math.abs(y - img.y) < hw)
-            handleType = "nw";
-          else if (
-            Math.abs(x - (img.x + img.width)) < hw &&
-            Math.abs(y - img.y) < hw
-          )
-            handleType = "ne";
-          else if (
-            Math.abs(x - img.x) < hw &&
-            Math.abs(y - (img.y + img.height)) < hw
-          )
-            handleType = "sw";
-          else if (
-            Math.abs(x - (img.x + img.width)) < hw &&
-            Math.abs(y - (img.y + img.height)) < hw
-          )
-            handleType = "se";
-        }
-        if (handleType) {
-          clickedItem = img;
-          break;
-        }
-        if (
-          x >= img.x &&
-          x <= img.x + img.width &&
-          y >= img.y &&
-          y <= img.y + img.height
-        ) {
-          clickedItem = img;
-          break;
-        }
-      }
+    // 1. FIRST PRIORITY: Check if a resizing handle of the SELECTED item was clicked
+    const selectedItemOnPage = pageItems.find(i => i.layoutId === selectedLayoutId);
+    
+    if (selectedItemOnPage) {
+        const img = selectedItemOnPage;
+        // Corner handles
+        if (Math.abs(x - img.x) < hw && Math.abs(y - img.y) < hw) handleType = "nw";
+        else if (Math.abs(x - (img.x + img.width)) < hw && Math.abs(y - img.y) < hw) handleType = "ne";
+        else if (Math.abs(x - img.x) < hw && Math.abs(y - (img.y + img.height)) < hw) handleType = "sw";
+        else if (Math.abs(x - (img.x + img.width)) < hw && Math.abs(y - (img.y + img.height)) < hw) handleType = "se";
+        // Edge handles (North, South, West, East)
+        else if (Math.abs(x - (img.x + img.width / 2)) < hw && Math.abs(y - img.y) < hw) handleType = "n";
+        else if (Math.abs(x - (img.x + img.width / 2)) < hw && Math.abs(y - (img.y + img.height)) < hw) handleType = "s";
+        else if (Math.abs(x - img.x) < hw && Math.abs(y - (img.y + img.height / 2)) < hw) handleType = "w";
+        else if (Math.abs(x - (img.x + img.width)) < hw && Math.abs(y - (img.y + img.height / 2)) < hw) handleType = "e";
 
-      if (clickedItem) {
+        if (handleType) clickedItem = img;
+    }
+
+    // 2. SECOND PRIORITY: If no handle was clicked, check if the body of any image was clicked
+    if (!handleType) {
+        // Search from top to bottom (reverse list) to grab the topmost image
+        for (let i = pageItems.length - 1; i >= 0; i--) {
+            const img = pageItems[i];
+            if (x >= img.x && x <= img.x + img.width && y >= img.y && y <= img.y + img.height) {
+                clickedItem = img;
+                break;
+            }
+        }
+    }
+
+    // 3. EXECUTION: Set interaction state
+    if (clickedItem) {
         setSelectedLayoutId(clickedItem.layoutId);
-setInteraction({
-  type: handleType ? "resize" : "move",
-  itemId: clickedItem.layoutId,
-  startMouse: { x, y },
-  initialItem: { ...clickedItem },
-  handle: handleType || undefined,
-});
-
-      } else {
+        setInteraction({
+            type: handleType ? "resize" : "move",
+            itemId: clickedItem.layoutId,
+            startMouse: { x, y },
+            initialItem: { ...clickedItem },
+            handle: handleType || undefined,
+        });
+    } else {
         setSelectedLayoutId(null);
-      }
-    };
+    }
+};
 
     const handleMouseMove = (e: React.MouseEvent) => {
       const { x, y } = getMousePos(e);
@@ -521,28 +475,51 @@ setInteraction({
           : "default";
 
       if (!interaction) return;
-      const dx = x - interaction.startMouse.x;
-      const dy = y - interaction.startMouse.y;
-      const init = interaction.initialItem;
+  const dx = x - interaction.startMouse.x;
+  const dy = y - interaction.startMouse.y;
+  const init = interaction.initialItem;
 
-      if (interaction.type === "move") {
-        updateLocalLayout(interaction.itemId, {
-          x: init.x + dx,
-          y: init.y + dy,
-        });
-      } else if (interaction.type === "resize") {
-        let newW = init.width,
-          newH = init.height;
-        if (interaction.handle?.includes("e"))
-          newW = Math.max(50, init.width + dx);
-        if (interaction.handle?.includes("s"))
-          newH = Math.max(50, init.height + dy);
-        const ratio = init.width / init.height;
-        if (interaction.handle?.includes("e")) newH = newW / ratio;
-        if (interaction.handle?.includes("s")) newW = newH * ratio;
-        updateLocalLayout(interaction.itemId, { width: newW, height: newH });
-      }
-    };
+  if (interaction.type === "move") {
+    updateLocalLayout(interaction.itemId, {
+      x: init.x + dx,
+      y: init.y + dy,
+    });
+  } else if (interaction.type === "resize") {
+    let newX = init.x;
+    let newY = init.y;
+    let newW = init.width;
+    let newH = init.height;
+
+    // Handle stretching from the Left/West
+    if (interaction.handle?.includes("w")) {
+      newX = init.x + dx;
+      newW = init.width - dx;
+    }
+    // Handle stretching from the Right/East
+    if (interaction.handle?.includes("e")) {
+      newW = init.width + dx;
+    }
+    // Handle stretching from the Top/North
+    if (interaction.handle?.includes("n")) {
+      newY = init.y + dy;
+      newH = init.height - dy;
+    }
+    // Handle stretching from the Bottom/South
+    if (interaction.handle?.includes("s")) {
+      newH = init.height + dy;
+    }
+
+    // MINIMUM SIZE SAFETY: Prevent images from disappearing
+    if (newW > 20 && newH > 20) {
+      updateLocalLayout(interaction.itemId, { 
+        x: newX, 
+        y: newY, 
+        width: newW, 
+        height: newH 
+      });
+    }
+  }
+};
 
     const handleMouseUp = () => {
   if (interaction?.type === "resize") {
