@@ -15,7 +15,7 @@ dist-ssr
 .env
 .env.development
 .env.production
-temp
+temp_uploads
 
 # Editor directories and files
 .vscode/*
