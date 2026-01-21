@@ -1,8 +1,10 @@
 {
   "dependencies": {
+    "@supabase/supabase-js": "^2.91.0",
     "@tailwindcss/vite": "^4.1.18",
     "jspdf": "^4.0.0",
     "lucide-react": "^0.562.0",
+    "react-router-dom": "^7.12.0",
     "tailwindcss": "^4.1.18"
   }
 }
