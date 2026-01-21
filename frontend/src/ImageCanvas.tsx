@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { jsPDF } from "jspdf";
+import { supabase } from "./Components/supabaseClient";
 import {
   Upload,
   Download,
@@ -15,19 +16,8 @@ import {
 } from "lucide-react";
 import BuyMeACoffee from "./BuyMeACoffee";
 import SidebarCoffeeButton from "./SidebarCoffeeButton";
-import GitHubStar from "./GitHubStar";
-import { sessionManager } from "./sessionManager";
+// import { sessionManager } from "./sessionManager";
 
-// ================= TYPES =================
-// type LayoutItem = {
-//   id: string;
-//   url: string;
-//   x: number;
-//   y: number;
-//   width: number;
-//   height: number;
-//   page: number;
-// };
 
 type LayoutItem = {
   layoutId: string; // ✅ unique per layout instance
@@ -78,11 +68,11 @@ const ImageCanvasStudio: React.FC = () => {
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
-  const [sessionInfo, setSessionInfo] = useState<{
-    image_count: number;
-    max_images: number;
-    remaining_images: number;
-  } | null>(null);
+  // const [sessionInfo, setSessionInfo] = useState<{
+  //   image_count: number;
+  //   max_images: number;
+  //   remaining_images: number;
+  // } | null>(null);
 
   // Interaction
   const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
@@ -95,80 +85,80 @@ const ImageCanvasStudio: React.FC = () => {
 
   // ================= SESSION MANAGEMENT =================
   
-  useEffect(() => {
-    // Initialize session and load session info
-    const initSession = async () => {
-      try {
-        const info = await sessionManager.getSessionInfo();
-        setSessionInfo(info);
-      } catch (error) {
-        console.error('Failed to initialize session:', error);
-      }
-    };
+  // useEffect(() => {
+  //   // Initialize session and load session info
+  //   const initSession = async () => {
+  //     try {
+  //       const info = await sessionManager.getSessionInfo();
+  //       setSessionInfo(info);
+  //     } catch (error) {
+  //       console.error('Failed to initialize session:', error);
+  //     }
+  //   };
     
-    initSession();
-  }, []);
+  //   initSession();
+  // }, []);
 
-  const updateSessionInfo = async () => {
-    try {
-      const info = await sessionManager.getSessionInfo();
-      setSessionInfo(info);
-    } catch (error) {
-      console.error('Failed to update session info:', error);
-    }
-  };
+  // const updateSessionInfo = async () => {
+  //   try {
+  //     const info = await sessionManager.getSessionInfo();
+  //     setSessionInfo(info);
+  //   } catch (error) {
+  //     console.error('Failed to update session info:', error);
+  //   }
+  // };
 
   // ================= API =================
 
   // 1. GENERATE LAYOUT
-  const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
-    if (currentAssets.length === 0) {
-      setLayoutImages([]);
-      setPageCount(1);
-      return;
-    }
-    setLoading(true);
-    try {
-      const payloadItems = currentAssets.map((a) => ({
-        id: a.id,
-        scale: a.scale,
-      }));
-      
-      const headers = await sessionManager.getSessionHeaders();
-      const response = await axios.post(`${API_URL}/layout`, {
-        items: payloadItems,
-        margin: 40,
-        gap: 20,
-      }, {
-        headers
-      });
+ const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
+  if (currentAssets.length === 0) {
+    setLayoutImages([]);
+    setPageCount(1);
+    return;
+  }
 
-      const newLayout: LayoutItem[] = [];
-      Object.entries(response.data.layout).forEach(([page, items]: any) => {
-        items.forEach((it: any) => {
-          newLayout.push({
-            layoutId: `${it.image_id}-${page}-${Math.random()}`,
-            imageId: it.image_id,
-            url: it.url,
-            x: it.x,
-            y: it.y,
-            width: it.width,
-            height: it.height,
-            page: Number(page),
-          });
+  setLoading(true);
+  try {
+    const payloadItems = currentAssets.map((a) => ({
+      id: a.id,
+      scale: a.scale,
+    }));
+
+    // 1. Get Token
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+
+    // 2. Post to /layout with Auth header
+    const response = await axios.post(`${API_URL}/layout`, 
+      { items: payloadItems, margin: 40, gap: 20 },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    const newLayout: LayoutItem[] = [];
+    Object.entries(response.data.layout).forEach(([page, items]: any) => {
+      items.forEach((it: any) => {
+        newLayout.push({
+          layoutId: `${it.image_id}-${page}-${Math.random()}`,
+          imageId: it.image_id,
+          url: it.url,
+          x: it.x,
+          y: it.y,
+          width: it.width,
+          height: it.height,
+          page: Number(page),
         });
       });
-      setLayoutImages(newLayout);
-      setPageCount(response.data.page_count || 1);
-    } catch (err) {
-      console.error(err);
-      if (axios.isAxiosError(err) && err.response?.status === 400) {
-        alert(err.response.data.error || 'Session error occurred');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    });
+
+    setLayoutImages(newLayout);
+    setPageCount(response.data.page_count || 1);
+  } catch (err) {
+    console.error("Layout error:", err);
+  } finally {
+    setLoading(false);
+  }
+}, []);
 
   // 2. DELETE IMAGE (Frontend + Backend)
   // const handleDelete = async (idToDelete: string) => {
@@ -192,36 +182,29 @@ const ImageCanvasStudio: React.FC = () => {
   // };
 
   const handleDelete = async (imageIdToDelete: string) => {
-    if (!imageIdToDelete) return;
+  if (!imageIdToDelete) return;
 
-    // Remove asset
-    const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
-    setAssets(updatedAssets);
+  // 1. UI Updates (Optimistic)
+  const updatedAssets = assets.filter(a => a.id !== imageIdToDelete);
+  setAssets(updatedAssets);
+  setSelectedLayoutId(null);
+  generateLayout(updatedAssets);
 
-    // Clear selection
-    setSelectedLayoutId(null);
+  // 2. Backend Delete
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
 
-    // Reflow layout
-    generateLayout(updatedAssets);
-
-    // Backend delete
-    try {
-      const headers = await sessionManager.getSessionHeaders();
-      await axios.post(`${API_URL}/delete_image`, {
-        image_id: imageIdToDelete,
-      }, {
-        headers
-      });
-      
-      // Update session info
-      await updateSessionInfo();
-    } catch (err) {
-      console.error("Failed to delete on server", err);
-      if (axios.isAxiosError(err) && err.response?.status === 400) {
-        alert(err.response.data.error || 'Session error occurred');
-      }
-    }
-  };
+    await axios.post(`${API_URL}/delete_image`, 
+      { image_id: imageIdToDelete },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    
+  } catch (err) {
+    console.error("Failed to delete image on server:", err);
+    alert("Could not delete the image from the server. It might already be gone.");
+  }
+};
 
 
   const MARGIN = 40;
@@ -238,56 +221,49 @@ const getLastPageCursor = (page: number) => {
 
 
   // 3. UPLOAD
- const handleUpload = async (uploadedFile: File, extractFigures = false) => {
+const handleUpload = async (uploadedFile: File, extractFigures = false) => {
   setLoading(true);
 
   try {
-    // Check session limits before upload
-    if (sessionInfo && sessionInfo.remaining_images <= 0) {
-      alert(`Maximum ${sessionInfo.max_images} images per session reached`);
-      setLoading(false);
-      return;
-    }
-
     const fd = new FormData();
     fd.append("file", uploadedFile);
     if (extractFigures) fd.append("extract_figures", "1");
 
-    const headers = await sessionManager.getSessionHeaders();
+    // 1. Get the current Supabase token
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+
+    if (!token) {
+      alert("You must be logged in to upload images.");
+      return;
+    }
+
+    // 2. Send request with Authorization header
     const res = await axios.post(`${API_URL}/extract_img`, fd, {
       headers: {
-        ...headers,
-        // Don't set Content-Type for FormData, let axios handle it
-      }
+        Authorization: `Bearer ${token}`,
+        // Note: Do not set Content-Type, axios does it for FormData
+      },
     });
 
     const newAssets: AssetItem[] = res.data.images.map((img: any) => ({
       id: img.id,
-      url: img.url, // Backend now returns full URLs
+      url: img.url, 
       scale: getFitScale(img.width, img.height),
       origW: img.width,
       origH: img.height,
     }));
 
-    /* ============================
-       FIRST UPLOAD → FULL LAYOUT
-       ============================ */
+    // Logic remains: If first upload, generate full layout. Otherwise, append.
     if (assets.length === 0) {
       const updated = [...newAssets];
       setAssets(updated);
       setTimeout(() => generateLayout(updated), 0);
-      
-      // Update session info
-      await updateSessionInfo();
       return;
     }
 
-    /* ============================
-       SUBSEQUENT UPLOAD → APPEND
-       ============================ */
     let currentPage = pageCount;
     let cursorY = getLastPageCursor(currentPage);
-
     const appendedLayouts: LayoutItem[] = [];
 
     newAssets.forEach((asset) => {
@@ -317,16 +293,10 @@ const getLastPageCursor = (page: number) => {
     setLayoutImages((prev) => [...prev, ...appendedLayouts]);
     setPageCount((prev) => Math.max(prev, currentPage));
     
-    // Update session info
-    await updateSessionInfo();
-    
-    // Show success feedback
-    alert(`Successfully uploaded ${newAssets.length} image(s)! They've been added to your canvas.`);
+    alert(`Successfully added ${newAssets.length} image(s) to your account.`);
   } catch (err) {
-    console.error(err);
-    if (axios.isAxiosError(err) && err.response?.status === 400) {
-      alert(err.response.data.error || 'Upload failed');
-    }
+    console.error("Upload error:", err);
+    alert("Upload failed. Please check your connection or login status.");
   } finally {
     setLoading(false);
   }
@@ -645,117 +615,31 @@ setInteraction({
 
   // ================= UI RENDER =================
   return (
-    <div className="flex h-screen bg-zinc-50">
+    <div className="flex h-screen w-full bg-zinc-100 text-zinc-900 font-sans overflow-hidden">
       {!hasContent ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-50/50 relative overflow-hidden">
-      {/* 1. DECORATIVE BACKGROUND GRID */}
-      <div className="absolute inset-0 z-0 opacity-[0.03] pointer-events-none">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-        <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-indigo-500 opacity-20 blur-[100px]"></div>
-      </div>
-
-      {/* 2. MAIN CONTENT WRAPPER */}
-      <div className="relative z-10 max-w-2xl w-full flex flex-col items-center">
-        {/* 3. HERO TITLE SECTION */}
-        <div className="text-center mb-10 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-zinc-900">
-            Smart Layout{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-violet-500">
-              Studio
-            </span>
+        <div className="flex-1 flex flex-col items-center justify-center p-8">
+          <div className="absolute top-6 right-6">
+            <BuyMeACoffee />
+          </div>
+          <h1 className="text-3xl font-black mb-6 text-zinc-800">
+            Smart Layout Studio
           </h1>
-
-          <p className="text-zinc-500 text-lg max-w-md mx-auto leading-relaxed">
-            Drag, drop, and let's organize your chaos. Turn scattered images
-            and PDFs into perfect A4 sheets in seconds.
-          </p>
-        </div>
-
-        {/* 4. CREATIVE UPLOAD CARD */}
-        <div className="relative group w-full max-w-md perspective-1000">
-          {/* Floating Decorative Elements (Abstract 'Files') */}
-          <div className="absolute -left-12 top-10 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 -rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:-translate-x-4 transition-all duration-500 delay-75"></div>
-          <div className="absolute -right-12 top-20 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:translate-x-4 transition-all duration-500 delay-100"></div>
-
-          {/* The Glow Effect */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl blur opacity-20 group-hover:opacity-60 transition duration-500 group-hover:duration-200"></div>
-
-          {/* The Main Dropzone */}
-          <div className="relative bg-white/80 backdrop-blur-xl border border-zinc-200 p-12 rounded-xl shadow-2xl flex flex-col items-center text-center gap-6 transition-transform duration-300 group-hover:-translate-y-1">
-            <div className="relative">
-              <div className="absolute inset-0 bg-indigo-100 rounded-full scale-150 opacity-0 group-hover:scale-125 group-hover:opacity-100 transition-all duration-500"></div>
-              <div className="relative bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 group-hover:border-indigo-100 transition-colors">
-                <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-600 transition-colors duration-300" />
-              </div>
+          <div className="border-2 border-dashed border-zinc-300 p-16 rounded-2xl hover:bg-white hover:border-indigo-400 cursor-pointer relative group transition-all">
+            <div className="flex flex-col items-center gap-4">
+              <Upload className="w-12 h-12 text-zinc-400 group-hover:text-indigo-500 transition-colors" />
+              <span className="text-zinc-500 font-medium">
+                Click to Upload Images or PDF
+              </span>
             </div>
-
-            <div className="space-y-1">
-              <h3 className="text-xl font-bold text-zinc-800 group-hover:text-indigo-600 transition-colors">
-                Drop your assets here
-              </h3>
-              <p className="text-sm font-medium text-zinc-400">
-                or click to browse local files
-              </p>
-            </div>
-
-            {/* Supported Formats Badge */}
-            <div className="flex gap-2 justify-center mt-2">
-              {["JPG", "PNG", "PDF"].map((fmt) => (
-                <span
-                  key={fmt}
-                  className="px-2 py-1 bg-zinc-50 border border-zinc-100 rounded text-[10px] font-bold text-zinc-400"
-                >
-                  {fmt}
-                </span>
-              ))}
-            </div>
-
-            {/* The Actual Input */}
             <input
               type="file"
-              multiple
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
+              className="absolute inset-0 opacity-0 cursor-pointer"
               onChange={(e) =>
                 e.target.files && handleUpload(e.target.files[0])
               }
             />
           </div>
         </div>
-
-        {/* 5. SUPPORT BUTTONS */}
-        <div className="flex flex-col sm:flex-row gap-4 mt-8 items-center">
-          <BuyMeACoffee className="w-full sm:w-auto" />
-          <GitHubStar className="w-full sm:w-auto" />
-        </div>
-
-        {/* 6. FEATURE HIGHLIGHTS */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl">
-          <div className="text-center p-6 bg-white/50 backdrop-blur-sm rounded-xl border border-zinc-200">
-            <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Upload className="w-6 h-6 text-indigo-600" />
-            </div>
-            <h3 className="font-bold text-zinc-800 mb-2">Smart Upload</h3>
-            <p className="text-sm text-zinc-600">Drag & drop images or PDFs. AI extracts and organizes everything automatically.</p>
-          </div>
-          
-          <div className="text-center p-6 bg-white/50 backdrop-blur-sm rounded-xl border border-zinc-200">
-            <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Layers className="w-6 h-6 text-purple-600" />
-            </div>
-            <h3 className="font-bold text-zinc-800 mb-2">Perfect Layout</h3>
-            <p className="text-sm text-zinc-600">Optimal A4 arrangement with smart spacing and professional formatting.</p>
-          </div>
-          
-          <div className="text-center p-6 bg-white/50 backdrop-blur-sm rounded-xl border border-zinc-200">
-            <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Download className="w-6 h-6 text-emerald-600" />
-            </div>
-            <h3 className="font-bold text-zinc-800 mb-2">Export Ready</h3>
-            <p className="text-sm text-zinc-600">High-quality PDF export ready for printing or sharing.</p>
-          </div>
-        </div>
-      </div>
-    </div>
       ) : (
         <>
           {/* SIDEBAR */}
@@ -778,7 +662,6 @@ setInteraction({
                 <span className="text-xs font-bold">Add Images / PDF</span>
                 <input
                   type="file"
-                  multiple
                   className="absolute inset-0 opacity-0 cursor-pointer"
                   onChange={(e) =>
                     e.target.files && handleUpload(e.target.files[0])
@@ -798,7 +681,7 @@ setInteraction({
               </div>
               
               {/* Session Info */}
-              {sessionInfo && (
+              {/* {sessionInfo && (
                 <div className="mt-3 p-2 bg-zinc-50 rounded-lg border border-zinc-200">
                   <div className="text-xs text-zinc-600">
                     <div className="flex justify-between">
@@ -813,7 +696,7 @@ setInteraction({
                     </div>
                   </div>
                 </div>
-              )}
+              )} */}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
@@ -895,8 +778,8 @@ setInteraction({
                     setAssets([]);
                     setPageCount(1);
                     setLayoutImages([]);
-                    setSessionInfo(null);
-                    sessionManager.clearSession();
+                    // setSessionInfo(null);
+                    // sessionManager.clearSession();
                   }}
                   className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
                   title="Clear All & Reset Session"
@@ -920,14 +803,14 @@ setInteraction({
                   className="transition-transform origin-top"
                   style={{
                     transform: `scale(${viewZoom})`,
-                    marginBottom: `${-((1 - viewZoom) * A4_HEIGHT)}px`,
+                    marginBottom: -((1 - viewZoom) * A4_HEIGHT),
                   }}
                 >
                   <div className="bg-white shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] relative">
                     {/* Page Canvas renders the delete overlay internally */}
                     <PageCanvas pageIndex={idx + 1} />
                   </div>
-                  <div className="text-center mt-3 text-[10px] font-bold text-zinc-300 uppercase tracking-widest" style={{ transform: `scale(${1/viewZoom})` }}>
+                  <div className="text-center mt-3 text-[10px] font-bold text-zinc-300 uppercase tracking-widest transform scale-[1/viewZoom]">
                     A4 Sheet {idx + 1}
                   </div>
                 </div>
