@@ -593,21 +593,24 @@ if (selectedLayoutId === img.layoutId) {
   // ================= UI RENDER =================
   return (
     <div className="flex h-screen w-full bg-zinc-100 text-zinc-900 font-sans overflow-hidden">
-      {!hasContent ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-8">
-          <div className="absolute top-6 right-6">
-            <BuyMeACoffee />
+      {/* SIDEBAR */}
+      <aside className="w-60 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl">
+        <div className="h-14 flex items-center px-4 border-b border-zinc-100 bg-zinc-50/50 justify-between">
+          <div className="flex items-center">
+            <Layers size={16} className="text-indigo-600 mr-2" />
+            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+              Pages ({pageCount})
+            </span>
           </div>
-          <h1 className="text-3xl font-black mb-6 text-zinc-800">
-            Smart Layout Studio
-          </h1>
-          <div className="border-2 border-dashed border-zinc-300 p-16 rounded-2xl hover:bg-white hover:border-indigo-400 cursor-pointer relative group transition-all">
-            <div className="flex flex-col items-center gap-4">
-              <Upload className="w-12 h-12 text-zinc-400 group-hover:text-indigo-500 transition-colors" />
-              <span className="text-zinc-500 font-medium">
-                Click to Upload Images or PDF
-              </span>
-            </div>
+        </div>
+
+        <div className="p-4 border-b border-zinc-100 bg-white z-10">
+          <div className="relative w-full flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2.5 rounded-lg border border-indigo-200 transition-all cursor-pointer group">
+            <Plus
+              size={16}
+              className="group-hover:scale-110 transition-transform"
+            />
+            <span className="text-xs font-bold">Add Images / PDF</span>
             <input
               type="file"
               className="absolute inset-0 opacity-0 cursor-pointer"
@@ -616,199 +619,193 @@ if (selectedLayoutId === img.layoutId) {
               }
             />
           </div>
+          
+          <div className="mt-2 relative w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 py-2.5 rounded-lg border border-emerald-200 cursor-pointer transition-all">
+            Extract Figures from Photo
+            <input
+              type="file"
+              className="absolute inset-0 opacity-0 cursor-pointer"
+              onChange={(e) =>
+                e.target.files && handleUpload(e.target.files[0], true)
+              }
+            />
+          </div>
         </div>
-      ) : (
-        <>
-          {/* SIDEBAR */}
-          <aside className="w-60 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl">
-            <div className="h-14 flex items-center px-4 border-b border-zinc-100 bg-zinc-50/50 justify-between">
-              <div className="flex items-center">
-                <Layers size={16} className="text-indigo-600 mr-2" />
-                <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">
-                  Pages ({pageCount})
-                </span>
-              </div>
-            </div>
 
-            <div className="p-4 border-b border-zinc-100 bg-white z-10">
-              <div className="relative w-full flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-2.5 rounded-lg border border-indigo-200 transition-all cursor-pointer group">
-                <Plus
-                  size={16}
-                  className="group-hover:scale-110 transition-transform"
-                />
-                <span className="text-xs font-bold">Add Images / PDF</span>
-                <input
-                  type="file"
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                  onChange={(e) =>
-                    e.target.files && handleUpload(e.target.files[0])
-                  }
-                />
-              </div>
-              
-              <div className="mt-2 relative w-full flex items-center justify-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 py-2.5 rounded-lg border border-emerald-200 cursor-pointer transition-all">
-                Extract Figures from Photo
-                <input
-                  type="file"
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                  onChange={(e) =>
-                    e.target.files && handleUpload(e.target.files[0], true)
-                  }
-                />
-              </div>
-              
-              {/* Session Info */}
-              {/* {sessionInfo && (
-                <div className="mt-3 p-2 bg-zinc-50 rounded-lg border border-zinc-200">
-                  <div className="text-xs text-zinc-600">
-                    <div className="flex justify-between">
-                      <span>Images:</span>
-                      <span className="font-mono">{sessionInfo.image_count}/{sessionInfo.max_images}</span>
-                    </div>
-                    <div className="w-full bg-zinc-200 rounded-full h-1.5 mt-1">
-                      <div 
-                        className="bg-indigo-600 h-1.5 rounded-full transition-all"
-                        style={{ width: `${(sessionInfo.image_count / sessionInfo.max_images) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )} */}
+        {!hasContent ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-16 h-16 bg-zinc-100 rounded-2xl flex items-center justify-center mb-4">
+              <Upload className="w-8 h-8 text-zinc-400" />
             </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
-              {Array.from({ length: pageCount }).map((_, idx) => (
+            <h3 className="font-bold text-zinc-800 mb-2">No Images Yet</h3>
+            <p className="text-sm text-zinc-500 mb-4">
+              Upload images or PDFs to get started with smart layouts
+            </p>
+            <div className="text-xs text-zinc-400">
+              Drag & drop files or use the buttons above
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
+            {Array.from({ length: pageCount }).map((_, idx) => (
+              <div
+                key={idx}
+                onClick={() => {
+                  setActivePageIndex(idx + 1);
+                  document
+                    .getElementById(`page-wrapper-${idx + 1}`)
+                    ?.scrollIntoView({ behavior: "smooth" });
+                }}
+                className={`group cursor-pointer flex flex-col items-center gap-2 transition-opacity duration-200 ${
+                  activePageIndex === idx + 1
+                    ? "opacity-100"
+                    : "opacity-60 hover:opacity-100"
+                }`}
+              >
                 <div
-                  key={idx}
-                  onClick={() => {
-                    setActivePageIndex(idx + 1);
-                    document
-                      .getElementById(`page-wrapper-${idx + 1}`)
-                      ?.scrollIntoView({ behavior: "smooth" });
-                  }}
-                  className={`group cursor-pointer flex flex-col items-center gap-2 transition-opacity duration-200 ${
+                  className={`relative border-2 rounded bg-white overflow-hidden shadow-sm transition-all ${
                     activePageIndex === idx + 1
-                      ? "opacity-100"
-                      : "opacity-60 hover:opacity-100"
+                      ? "border-indigo-600 ring-2 ring-indigo-50 scale-105"
+                      : "border-zinc-200 group-hover:border-indigo-300"
                   }`}
                 >
-                  <div
-                    className={`relative border-2 rounded bg-white overflow-hidden shadow-sm transition-all ${
-                      activePageIndex === idx + 1
-                        ? "border-indigo-600 ring-2 ring-indigo-50 scale-105"
-                        : "border-zinc-200 group-hover:border-indigo-300"
-                    }`}
-                  >
-                    <ThumbnailCanvas pageIndex={idx + 1} />
-                  </div>
-                  <span
-                    className={`text-[10px] font-bold ${
-                      activePageIndex === idx + 1
-                        ? "text-indigo-600"
-                        : "text-zinc-400"
-                    }`}
-                  >
-                    Page {idx + 1}
-                  </span>
+                  <ThumbnailCanvas pageIndex={idx + 1} />
                 </div>
-              ))}
-            </div>
-
-            {/* Coffee button at bottom of sidebar */}
-            <div className="p-4 border-t border-zinc-200 bg-white">
-              <SidebarCoffeeButton />
-            </div>
-          </aside>
-
-          {/* MAIN AREA */}
-          <main className="flex-1 flex flex-col bg-zinc-200/50 overflow-hidden relative">
-            <header className="h-14 bg-white border-b border-zinc-200 px-6 flex items-center justify-between z-10 shadow-sm">
-              <div className="flex items-center gap-2">
-                {loading ? (
-                  <Loader2 size={16} className="animate-spin text-indigo-600" />
-                ) : (
-                  <RefreshCw size={16} className="text-indigo-600" />
-                )}
-                <span className="text-xs font-bold text-zinc-500">
-                  {loading ? "Optimizing Layout..." : "Smart Reflow Active"}
+                <span
+                  className={`text-[10px] font-bold ${
+                    activePageIndex === idx + 1
+                      ? "text-indigo-600"
+                      : "text-zinc-400"
+                  }`}
+                >
+                  Page {idx + 1}
                 </span>
               </div>
-              <div className="flex items-center gap-3 bg-zinc-100 rounded-full px-4 py-1.5 border border-zinc-200">
-                <ZoomOut
-                  size={14}
-                  onClick={() => setViewZoom((z) => Math.max(0.2, z - 0.1))}
-                  className="cursor-pointer text-zinc-500 hover:text-black"
-                />
-                <span className="text-xs font-mono min-w-[32px] text-center">
-                  {Math.round(viewZoom * 100)}%
-                </span>
-                <ZoomIn
-                  size={14}
-                  onClick={() => setViewZoom((z) => Math.min(1.5, z + 0.1))}
-                  className="cursor-pointer text-zinc-500 hover:text-black"
-                />
-              </div>
-              <div className="flex gap-2">
-                <BuyMeACoffee className="mr-2" />
-                <button
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                  }}
-                  className="p-2 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-600 rounded-lg transition-colors"
-                  title="Sign Out"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                    <polyline points="16,17 21,12 16,7"/>
-                    <line x1="21" y1="12" x2="9" y2="12"/>
-                  </svg>
-                </button>
-                <button
-                  onClick={() => {
-                    setAssets([]);
-                    setPageCount(1);
-                    setLayoutImages([]);
-                    // setSessionInfo(null);
-                    // sessionManager.clearSession();
-                  }}
-                  className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
-                  title="Clear All & Reset Session"
-                >
-                  <Trash2 size={18} />
-                </button>
-                <button
-                  onClick={exportToPDF}
-                  className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-md"
-                >
-                  <Download size={14} /> Export
-                </button>
-              </div>
-            </header>
+            ))}
+          </div>
+        )}
 
-            <div className="flex-1 overflow-auto p-12 flex flex-col items-center gap-8 scroll-smooth">
-              {Array.from({ length: pageCount }).map((_, idx) => (
-                <div
-                  key={idx}
-                  id={`page-wrapper-${idx + 1}`}
-                  className="transition-transform origin-top"
-                  style={{
-                    transform: `scale(${viewZoom})`,
-                    marginBottom: -((1 - viewZoom) * A4_HEIGHT),
-                  }}
-                >
-                  <div className="bg-white shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] relative">
-                    {/* Page Canvas renders the delete overlay internally */}
-                    <PageCanvas pageIndex={idx + 1} />
-                  </div>
-                  <div className="text-center mt-3 text-[10px] font-bold text-zinc-300 uppercase tracking-widest transform scale-[1/viewZoom]">
-                    A4 Sheet {idx + 1}
-                  </div>
-                </div>
-              ))}
+        {/* Coffee button at bottom of sidebar */}
+        <div className="p-4 border-t border-zinc-200 bg-white">
+          <SidebarCoffeeButton />
+        </div>
+      </aside>
+
+      {/* MAIN AREA */}
+      <main className="flex-1 flex flex-col bg-zinc-200/50 overflow-hidden relative">
+        <header className="h-14 bg-white border-b border-zinc-200 px-6 flex items-center justify-between z-10 shadow-sm">
+          <div className="flex items-center gap-2">
+            {loading ? (
+              <Loader2 size={16} className="animate-spin text-indigo-600" />
+            ) : (
+              <RefreshCw size={16} className="text-indigo-600" />
+            )}
+            <span className="text-xs font-bold text-zinc-500">
+              {loading ? "Optimizing Layout..." : "Smart Reflow Active"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 bg-zinc-100 rounded-full px-4 py-1.5 border border-zinc-200">
+            <ZoomOut
+              size={14}
+              onClick={() => setViewZoom((z) => Math.max(0.2, z - 0.1))}
+              className="cursor-pointer text-zinc-500 hover:text-black"
+            />
+            <span className="text-xs font-mono min-w-[32px] text-center">
+              {Math.round(viewZoom * 100)}%
+            </span>
+            <ZoomIn
+              size={14}
+              onClick={() => setViewZoom((z) => Math.min(1.5, z + 0.1))}
+              className="cursor-pointer text-zinc-500 hover:text-black"
+            />
+          </div>
+          <div className="flex gap-2">
+            <BuyMeACoffee className="mr-2" />
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+              }}
+              className="p-2 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-600 rounded-lg transition-colors"
+              title="Sign Out"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16,17 21,12 16,7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                setAssets([]);
+                setPageCount(1);
+                setLayoutImages([]);
+              }}
+              className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
+              title="Clear All & Reset Session"
+            >
+              <Trash2 size={18} />
+            </button>
+            {hasContent && (
+              <button
+                onClick={exportToPDF}
+                className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-md"
+              >
+                <Download size={14} /> Export
+              </button>
+            )}
+          </div>
+        </header>
+
+        {!hasContent ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8">
+            <div className="absolute top-6 right-6">
+              <BuyMeACoffee />
             </div>
-          </main>
-        </>
-      )}
+            <h1 className="text-4xl font-black mb-6 text-zinc-800">
+              Smart Layout Studio
+            </h1>
+            <div className="border-2 border-dashed border-zinc-300 p-16 rounded-2xl hover:bg-white hover:border-indigo-400 cursor-pointer relative group transition-all max-w-lg">
+              <div className="flex flex-col items-center gap-4">
+                <Upload className="w-12 h-12 text-zinc-400 group-hover:text-indigo-500 transition-colors" />
+                <span className="text-zinc-500 font-medium">
+                  Click to Upload Images or PDF
+                </span>
+                <span className="text-xs text-zinc-400">
+                  Or use the sidebar buttons to get started
+                </span>
+              </div>
+              <input
+                type="file"
+                className="absolute inset-0 opacity-0 cursor-pointer"
+                onChange={(e) =>
+                  e.target.files && handleUpload(e.target.files[0])
+                }
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-auto p-12 flex flex-col items-center gap-8 scroll-smooth">
+            {Array.from({ length: pageCount }).map((_, idx) => (
+              <div
+                key={idx}
+                id={`page-wrapper-${idx + 1}`}
+                className="transition-transform origin-top"
+                style={{
+                  transform: `scale(${viewZoom})`,
+                  marginBottom: -((1 - viewZoom) * A4_HEIGHT),
+                }}
+              >
+                <div className="bg-white shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] relative">
+                  <PageCanvas pageIndex={idx + 1} />
+                </div>
+                <div className="text-center mt-3 text-[10px] font-bold text-zinc-300 uppercase tracking-widest transform scale-[1/viewZoom]">
+                  A4 Sheet {idx + 1}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
     </div>
   );
 };
