@@ -4,7 +4,7 @@
  */
 
 const SESSION_STORAGE_KEY = 'image_layout_session_id';
-const API_URL = 'http://localhost:5001';
+const API_URL = import.meta.env.VITE_API_URL;
 
 export class SessionManager {
   private sessionId: string | null = null;

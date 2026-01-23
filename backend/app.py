@@ -28,12 +28,15 @@ CORS(app, resources={r"/*": {"origins": ["http://localhost:5173"]}},
 # --- AUTH HELPER ---
 def get_user_id_from_auth():
     auth_header = request.headers.get("Authorization")
-    if not auth_header: return None
+    if not auth_header: 
+        return None
     try:
         token = auth_header.replace("Bearer ", "")
         user = supabase.auth.get_user(token)
         return user.user.id if user and user.user else None
-    except: return None
+    except Exception as e:
+        print(f"Auth error: {e}")
+        return None
 
 # --- STORAGE HELPERS ---
 def upload_to_supabase(user_id, img_id, ext, data):
@@ -286,4 +289,4 @@ def delete_image():
     return jsonify({"success": True})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="0.0.0.0", port=5002, debug=True)
