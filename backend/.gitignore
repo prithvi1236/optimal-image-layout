@@ -1,4 +1,6 @@
 venv
 output
 uploads
+temp_uploads
 extracted
+.env

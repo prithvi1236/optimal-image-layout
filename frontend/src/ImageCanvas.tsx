@@ -49,7 +49,7 @@ type InteractionState = {
 
 const A4_WIDTH = 794;
 const A4_HEIGHT = 1123;
-const API_URL = "http://localhost:5001";
+const API_URL = import.meta.env.VITE_API_URL;
 const MAX_CONTENT_WIDTH = A4_WIDTH - 80;   // margin * 2
 const MAX_CONTENT_HEIGHT = A4_HEIGHT - 80;
 const HANDLE_SIZE = 10;
@@ -750,6 +750,19 @@ if (selectedLayoutId === img.layoutId) {
               </div>
               <div className="flex gap-2">
                 <BuyMeACoffee className="mr-2" />
+                <button
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                  }}
+                  className="p-2 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-600 rounded-lg transition-colors"
+                  title="Sign Out"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16,17 21,12 16,7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                </button>
                 <button
                   onClick={() => {
                     setAssets([]);
