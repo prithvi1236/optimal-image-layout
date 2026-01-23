@@ -1,5 +1,5 @@
-import os, io, uuid, traceback, time, re
-from flask import Flask, request, jsonify
+import os, io, uuid, traceback, time, re, json
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import fitz  # PyMuPDF
 from PIL import Image
@@ -7,7 +7,9 @@ from rectpack import newPacker, PackingMode, MaxRectsBssf, SORT_NONE
 import cv2
 import numpy as np
 from dotenv import load_dotenv
-from supabase import create_client, Client 
+from supabase import create_client, Client
+from concurrent.futures import ThreadPoolExecutor
+import threading 
 
 load_dotenv() 
 
@@ -159,22 +161,32 @@ def extract_img():
 
 def extract_figures_from_image(image_path, user_id):
     """
-    Restored original logic: Extract figure regions from a single image using OpenCV, 
-    upload each crop to Supabase, and store metadata.
+    OPTIMIZED: Parallel figure extraction with faster OpenCV parameters
     """
     img = cv2.imread(image_path)
     if img is None:
         return []
 
+    # Resize large images for faster processing
+    height, width = img.shape[:2]
+    if width > 2000 or height > 2000:
+        scale = min(2000/width, 2000/height)
+        new_width = int(width * scale)
+        new_height = int(height * scale)
+        img = cv2.resize(img, (new_width, new_height))
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # OPTIMIZED: Faster adaptive threshold parameters
     thresh = cv2.adaptiveThreshold(
         gray, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        15, 10
+        11, 8  # Reduced from 15, 10 for speed
     )
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    # OPTIMIZED: Smaller kernel for faster morphology
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))  # Reduced from 25x25
     clean = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
     contours, _ = cv2.findContours(
@@ -183,39 +195,148 @@ def extract_figures_from_image(image_path, user_id):
         cv2.CHAIN_APPROX_SIMPLE
     )
 
-    extracted_list = []
-
-    for cnt in contours:
+    # PARALLEL PROCESSING: Process multiple crops simultaneously
+    def process_contour(cnt):
         x, y, w, h = cv2.boundingRect(cnt)
+        
+        # Early filtering - skip small regions
+        if w < 100 or h < 100:  # Reduced threshold for speed
+            return None
+            
+        crop = img[y:y+h, x:x+w]
+        img_id = str(uuid.uuid4())
+        ext = "png"
 
-        # Your original threshold for a "figure"
-        if w > 150 and h > 150:
-            crop = img[y:y+h, x:x+w]
+        success, buf = cv2.imencode(".png", crop)
+        if not success:
+            return None
+            
+        bytes_data = buf.tobytes()
+        path = upload_to_supabase(user_id, img_id, ext, bytes_data)
+        db_insert_image(img_id, user_id, path, w, h, ext)
 
-            img_id = str(uuid.uuid4())
-            ext = "png"
+        return {
+            "id": img_id,
+            "width": w,
+            "height": h,
+            "ext": ext,
+            "url": get_url(path)
+        }
 
-            # Encode the crop to PNG bytes
-            success, buf = cv2.imencode(".png", crop)
-            if not success:
-                continue
-            bytes_data = buf.tobytes()
-
-            # Upload using the user-scoped path
-            path = upload_to_supabase(user_id, img_id, ext, bytes_data)
-
-            # Insert into DB
-            db_insert_image(img_id, user_id, path, w, h, ext)
-
-            extracted_list.append({
-                "id": img_id,
-                "width": w,
-                "height": h,
-                "ext": ext,
-                "url": get_url(path)
-            })
+    # Process contours in parallel
+    extracted_list = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = executor.map(process_contour, contours)
+        extracted_list = [r for r in results if r is not None]
 
     return extracted_list
+
+# --- STREAMING LAYOUT ENGINE ---
+@app.route("/layout_stream", methods=["POST"])
+def create_layout_stream():
+    """
+    STREAMING: Generate layout page-by-page and stream results
+    """
+    user_id = get_user_id_from_auth()
+    if not user_id: 
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.get_json()
+    items, margin, gap = data.get("items", []), data.get("margin", 40), data.get("gap", 20)
+    
+    def generate_streaming_layout():
+        max_w, max_h = A4_WIDTH - 2*margin, A4_HEIGHT - 2*margin
+        rects = []
+
+        # Prepare rectangles with image data
+        for it in items:
+            img = db_get_image(it["id"], user_id)
+            if img:
+                orig_w, orig_h = img["width"], img["height"]
+                scale = it.get("scale", 1)
+                w, h = int(orig_w * scale), int(orig_h * scale)
+
+                # Scale down if needed
+                max_allowed_w, max_allowed_h = max_w - gap, max_h - gap
+                if w > max_allowed_w or h > max_allowed_h:
+                    ratio = min(max_allowed_w / w, max_allowed_h / h)
+                    w, h = int(w * ratio), int(h * ratio)
+
+                rects.append({
+                    "w": w + gap, "h": h + gap, "id": it["id"], 
+                    "img": img, "final_w": w, "final_h": h
+                })
+
+        # Sort by height for better packing
+        rects.sort(key=lambda x: x["h"], reverse=True)
+        
+        page_num = 1
+        remaining_rects = rects[:]
+        
+        while remaining_rects:
+            # Create packer for current page
+            packer = newPacker(mode=PackingMode.Offline, pack_algo=MaxRectsBssf, sort_algo=SORT_NONE)
+            packer.add_bin(max_w, max_h)
+            
+            # Add all remaining rectangles
+            for r in remaining_rects:
+                packer.add_rect(r["w"], r["h"], r["id"])
+            
+            packer.pack()
+            
+            # Extract items that fit on this page
+            page_items = []
+            placed_ids = set()
+            
+            for b, x, y, w, h, rid in packer.rect_list():
+                if b == 0:  # Only first bin (current page)
+                    rect_data = next(r for r in remaining_rects if r["id"] == rid)
+                    page_items.append({
+                        "image_id": rid,
+                        "x": x + margin,
+                        "y": y + margin,
+                        "width": rect_data["final_w"],
+                        "height": rect_data["final_h"],
+                        "url": get_url(rect_data["img"]["storage_path"])
+                    })
+                    placed_ids.add(rid)
+            
+            # Stream this page immediately
+            if page_items:
+                page_data = {
+                    "type": "page",
+                    "page": page_num,
+                    "items": page_items,
+                    "completed": False
+                }
+                yield f"data: {json.dumps(page_data)}\n\n"
+                page_num += 1
+            
+            # Remove placed items from remaining
+            remaining_rects = [r for r in remaining_rects if r["id"] not in placed_ids]
+            
+            # Safety break if no progress
+            if not placed_ids:
+                break
+        
+        # Send completion signal
+        completion_data = {
+            "type": "complete",
+            "total_pages": page_num - 1,
+            "completed": True
+        }
+        yield f"data: {json.dumps(completion_data)}\n\n"
+
+    return Response(
+        generate_streaming_layout(),
+        mimetype='text/plain',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': 'http://localhost:5173',
+            'Access-Control-Allow-Credentials': 'true'
+        }
+    )
 
 # --- OPTIMIZED LAYOUT ENGINE ---
 @app.route("/layout", methods=["POST"])
@@ -278,6 +399,40 @@ def create_layout():
             "width": w - gap, "height": h - gap, "url": get_url(img["storage_path"])
         })
     return jsonify({"layout": res_layout, "page_count": len(res_layout) or 1})
+
+@app.route("/user_images", methods=["GET"])
+def get_user_images():
+    """
+    Get all images for the current user to restore session
+    """
+    user_id = get_user_id_from_auth()
+    if not user_id: 
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        # Get all images for this user
+        result = supabase.table("images").select("*").eq("user_id", user_id).execute()
+        
+        images = []
+        for img in result.data:
+            # Calculate default scale based on image size
+            orig_w, orig_h = img["width"], img["height"]
+            max_w, max_h = A4_WIDTH - 80, A4_HEIGHT - 80  # Account for margins
+            scale = min(1.0, max_w / orig_w, max_h / orig_h)
+            
+            images.append({
+                "id": img["id"],
+                "url": get_url(img["storage_path"]),
+                "scale": scale,
+                "origW": orig_w,
+                "origH": orig_h
+            })
+        
+        return jsonify({"images": images})
+        
+    except Exception as e:
+        print(f"Error fetching user images: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/delete_image", methods=["POST"])
 def delete_image():
