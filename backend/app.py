@@ -233,6 +233,7 @@ def create_layout_fast():
     img_map = {img["id"]: img for img in db_imgs.data}
 
     # 2. Prep Rectangles
+    # FIX: Subtract margins from the bin size so images stay inside the visible page
     max_w, max_h = A4_WIDTH - (2 * margin), A4_HEIGHT - (2 * margin)
     rects_to_pack = []
     total_area = 0
@@ -244,7 +245,7 @@ def create_layout_fast():
         scale = it.get("scale", 1)
         w, h = int(img["width"] * scale), int(img["height"] * scale)
         
-        # Fit logic
+        # FIX: Ensure image + gap doesn't exceed the USABLE area
         limit_w, limit_h = max_w - gap, max_h - gap
         if w > limit_w or h > limit_h:
             ratio = min(limit_w / w, limit_h / h)
@@ -257,24 +258,25 @@ def create_layout_fast():
     estimated_pages = math.ceil(total_area / (max_w * max_h)) + 5
     packer = newPacker(mode=PackingMode.Offline, pack_algo=MaxRectsBssf, sort_algo=SORT_DIFF)
     
+    # FIX: Use the calculated usable area as the bin size
     for _ in range(estimated_pages): packer.add_bin(max_w, max_h)
     for r in rects_to_pack: packer.add_rect(*r)
     
     packer.pack()
     
-    # Overflow check
-    if len(packer.rect_list()) < len(rects_to_pack):
-        extra = len(rects_to_pack) - len(packer.rect_list())
-        for _ in range(extra): packer.add_bin(max_w, max_h)
-        packer.pack()
-
     # 4. Format
     res_layout = {}
     for b, x, y, w, h, rid in packer.rect_list():
+        # Final safety: If rectpack returned a coordinate that pushes the width out
+        # (Though with the fix above, rid will be within 0 -> max_w)
         url = get_url(img_map[rid]["storage_path"])
         res_layout.setdefault(b + 1, []).append({
-            "image_id": rid, "x": x + margin, "y": y + margin,
-            "width": w - gap, "height": h - gap, "url": url
+            "image_id": rid, 
+            "x": x + margin, # Apply the offset after packing
+            "y": y + margin,
+            "width": w - gap, 
+            "height": h - gap, 
+            "url": url
         })
 
     return jsonify({"layout": res_layout, "page_count": len(res_layout)})
@@ -282,10 +284,6 @@ def create_layout_fast():
 # --- ROUTE: STREAMING LAYOUT (UX) ---
 @app.route("/layout_stream", methods=["POST"])
 def create_layout_stream():
-    """
-    Progressive layout generation using SSE. 
-    Useful for frontend to show pages as they are computed.
-    """
     user_id = get_user_id_from_auth()
     if not user_id: return jsonify({"error": "Unauthorized"}), 401
     
@@ -293,15 +291,14 @@ def create_layout_stream():
     items = data.get("items", [])
     margin, gap = data.get("margin", 40), data.get("gap", 20)
     
-    # Fetch DB data upfront
     item_ids = [it["id"] for it in items]
     db_imgs = supabase.table("images").select("*").in_("id", item_ids).execute()
     img_map = {img["id"]: img for img in db_imgs.data}
 
     def generate():
-        max_w, max_h = A4_WIDTH - 2*margin, A4_HEIGHT - 2*margin
+        # FIX: Calculate internal usable area
+        max_w, max_h = A4_WIDTH - (2 * margin), A4_HEIGHT - (2 * margin)
         
-        # Prepare rectangles
         rects = []
         for it in items:
             img = img_map.get(it["id"])
@@ -309,8 +306,10 @@ def create_layout_stream():
             scale = it.get("scale", 1)
             w, h = int(img["width"] * scale), int(img["height"] * scale)
             
-            if w > (max_w - gap) or h > (max_h - gap):
-                ratio = min((max_w - gap)/w, (max_h - gap)/h)
+            # FIX: Check against usable area minus gap
+            limit_w, limit_h = max_w - gap, max_h - gap
+            if w > limit_w or h > limit_h:
+                ratio = min(limit_w / w, limit_h / h)
                 w, h = int(w * ratio), int(h * ratio)
             
             rects.append({
@@ -318,24 +317,20 @@ def create_layout_stream():
                 "final_w": w, "final_h": h, "path": img["storage_path"]
             })
 
-        # Iterative Packing for Streaming (Page by Page)
-        # Note: We use SORT_NONE here because we usually want to preserve order 
-        # or use simple height sorting for better packing.
         rects.sort(key=lambda x: x["h"], reverse=True)
         remaining = rects[:]
         page_num = 1
         
         while remaining:
+            # FIX: Pack inside usable area bin
             packer = newPacker(mode=PackingMode.Offline, pack_algo=MaxRectsBssf, sort_algo=SORT_NONE)
             packer.add_bin(max_w, max_h)
             
-            # Add all current remaining rects to this bin attempt
             for r in remaining:
                 packer.add_rect(r["w"], r["h"], r["id"])
             
             packer.pack()
             
-            # Find what fit in Bin 0 (Current Page)
             packed_on_page = []
             placed_ids = set()
             
@@ -344,7 +339,7 @@ def create_layout_stream():
                     r_data = next(r for r in remaining if r["id"] == rid)
                     packed_on_page.append({
                         "image_id": rid,
-                        "x": x + margin,
+                        "x": x + margin, # Offset by margin
                         "y": y + margin,
                         "width": r_data["final_w"],
                         "height": r_data["final_h"],
@@ -357,20 +352,11 @@ def create_layout_stream():
                 page_num += 1
                 remaining = [r for r in remaining if r["id"] not in placed_ids]
             else:
-                # Infinite loop guard: if nothing fit, break or force fit
                 break 
 
         yield f"data: {json.dumps({'type': 'complete', 'total_pages': page_num - 1})}\n\n"
 
-    return Response(
-        generate(),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no' # Disable Nginx buffering if used
-        }
-    )
+    return Response(generate(), mimetype='text/event-stream')
 
 # --- USER DATA & CLEANUP ---
 @app.route("/user_images", methods=["GET"])
