@@ -230,16 +230,29 @@ def create_layout():
     for it in items:
         img = db_get_image(it["id"], user_id)
         if img:
-            w = int(img["width"] * it["scale"])
-            h = int(img["height"] * it["scale"])
-            
-            # AUTO-SCALE: Ensure single images aren't larger than the page
-            if h > (max_h - gap):
-                ratio = (max_h - gap) / h
-                h = max_h - gap
-                w = int(w * ratio)
+            orig_w = img["width"]
+            orig_h = img["height"]
 
+            # 1. Apply user scale (default scale = 1)
+            scale = it.get("scale", 1)
+            w = int(orig_w * scale)
+            h = int(orig_h * scale)
+
+            # 2. Only scale DOWN if image exceeds printable area
+            max_allowed_w = max_w - gap
+            max_allowed_h = max_h - gap
+
+            if w > max_allowed_w or h > max_allowed_h:
+                ratio_w = max_allowed_w / w
+                ratio_h = max_allowed_h / h
+                ratio = min(ratio_w, ratio_h)  # preserve aspect ratio
+
+                w = int(w * ratio)
+                h = int(h * ratio)
+
+            # 3. Add to packer
             rects.append((w + gap, h + gap, it["id"]))
+
 
     # STABILITY FIX: Sorting by height descending makes packing much tighter
     rects.sort(key=lambda x: x[1], reverse=True)
