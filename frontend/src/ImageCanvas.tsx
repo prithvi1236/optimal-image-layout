@@ -70,6 +70,7 @@ const ImageCanvasStudio: React.FC = () => {
   const [sessionRestoring, setSessionRestoring] = useState(true);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [showScaleSavedIndicator, setShowScaleSavedIndicator] = useState(false);
+  const [pendingLayout, setPendingLayout] = useState<LayoutItem[]>([]);
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
@@ -226,106 +227,112 @@ const ImageCanvasStudio: React.FC = () => {
   // ================= API =================
 
   // 1. STREAMING LAYOUT GENERATION
-  const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) => {
-    if (currentAssets.length === 0) {
-      setLayoutImages([]);
-      setPageCount(1);
-      return;
-    }
+const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) => {
+  if (currentAssets.length === 0) {
+    setLayoutImages([]);
+    setPageCount(1);
+    return;
+  }
 
-    setLoading(true);
-    setLayoutImages([]); // Clear existing layout
-    setPageCount(0); // Reset page count
-    setLoadingPages(new Set([1])); // Start with page 1 loading
-    
-    try {
-      const payloadItems = currentAssets.map((a) => ({
-        id: a.id,
-        scale: a.scale,
-      }));
+  // FIX 1: Don't clear setLayoutImages([]) here. 
+  // We keep the old layout visible so the screen doesn't go blank (blink).
+  setIsReflowing(true);
+  setLoading(true);
+  
+  // Start with page 1 loading indicator
+  setLoadingPages(new Set([1])); 
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
+  // This variable acts as our "Double Buffer"
+  let incomingLayoutAccumulator: LayoutItem[] = [];
 
-      // Use streaming fetch for progressive updates
-      const response = await fetch(`${API_URL}/layout_stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ items: payloadItems, margin: 40, gap: 20 })
-      });
+  try {
+    const payloadItems = currentAssets.map((a) => ({
+      id: a.id,
+      scale: a.scale,
+    }));
 
-      if (!response.body) throw new Error('No response body');
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+    const response = await fetch(`${API_URL}/layout_stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ items: payloadItems, margin: 40, gap: 20 })
+    });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+    if (!response.body) throw new Error('No response body');
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            
+            if (data.type === 'page') {
+              const newLayoutItems: LayoutItem[] = data.items.map((item: any) => ({
+                layoutId: `${item.image_id}-${data.page}-${Math.random()}`,
+                imageId: item.image_id,
+                url: item.url,
+                x: item.x,
+                y: item.y,
+                width: item.width,
+                height: item.height,
+                page: data.page,
+              }));
+
+              // FIX 2: Store in our local buffer instead of triggering a state re-render
+              incomingLayoutAccumulator = [...incomingLayoutAccumulator, ...newLayoutItems];
               
-              if (data.type === 'page') {
-                // Add new page items progressively
-                const newLayoutItems: LayoutItem[] = data.items.map((item: any) => ({
-                  layoutId: `${item.image_id}-${data.page}-${Math.random()}`,
-                  imageId: item.image_id,
-                  url: item.url,
-                  x: item.x,
-                  y: item.y,
-                  width: item.width,
-                  height: item.height,
-                  page: data.page,
-                }));
+              setLoadingPages(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(data.page);
+                newSet.add(data.page + 1);
+                return newSet;
+              });
+              
+              newLayoutItems.forEach(img => {
+                if (!loadedImages[img.imageId]) {
+                  const im = new Image();
+                  im.crossOrigin = "anonymous";
+                  im.src = img.url;
+                  im.onload = () =>
+                    setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
+                }
+              });
 
-                // Update layout progressively
-                setLayoutImages(prev => [...prev, ...newLayoutItems]);
-                setPageCount(prev => Math.max(prev, data.page));
-                
-                // Mark this page as loaded, add next page as loading
-                setLoadingPages(prev => {
-                  const newSet = new Set(prev);
-                  newSet.delete(data.page);
-                  newSet.add(data.page + 1);
-                  return newSet;
-                });
-                
-                // Preload images for this page
-                newLayoutItems.forEach(img => {
-                  if (!loadedImages[img.imageId]) {
-                    const im = new Image();
-                    im.crossOrigin = "anonymous";
-                    im.src = img.url;
-                    im.onload = () =>
-                      setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
-                  }
-                });
-
-              } else if (data.type === 'complete') {
-                setPageCount(data.total_pages);
-                setLoadingPages(new Set()); // Clear all loading states
-                setLoading(false);
-              }
-            } catch (e) {
-              console.error('Error parsing streaming data:', e);
+            } else if (data.type === 'complete') {
+              // FIX 3: ONLY SWAP THE IMAGES NOW. 
+              // The screen updates from "Old Layout" to "New Layout" in one frame.
+              setLayoutImages(incomingLayoutAccumulator);
+              setPageCount(data.total_pages);
+              setLoadingPages(new Set()); 
+              setLoading(false);
+              setIsReflowing(false);
             }
+          } catch (e) {
+            console.error('Error parsing streaming data:', e);
           }
         }
       }
-    } catch (err) {
-      console.error("Streaming layout error:", err);
-      setLoading(false);
     }
-  }, [loadedImages]);
+  } catch (err) {
+    console.error("Streaming layout error:", err);
+    setLoading(false);
+    setIsReflowing(false);
+  }
+}, [loadedImages]);
 
   // 2. FALLBACK: Original layout generation for compatibility
  const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {

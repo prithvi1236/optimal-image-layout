@@ -113,25 +113,36 @@ def process_cv2_figures_parallel(image_path, user_id):
     img = cv2.imread(image_path)
     if img is None: return []
 
-    # Resize massive images
+    # 1. Standard Resize
     h, w = img.shape[:2]
     if w > 2500 or h > 2500:
         scale = min(2500/w, 2500/h)
         img = cv2.resize(img, None, fx=scale, fy=scale)
 
-    # Fast preprocessing
+    # 2. Preprocessing
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 8)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-    clean = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-    contours, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Binary inverse so text/lines are white and background is black
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                   cv2.THRESH_BINARY_INV, 11, 8)
+
+    # 3. HORIZONTAL BRIDGING (The Fix)
+    # We use a very wide but short kernel to connect columns and words 
+    # without merging the top diagram into the bottom text.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (100, 15)) 
+    dilated = cv2.dilate(thresh, kernel, iterations=2)
+
+    
+    # 4. Find large blocks
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     upload_tasks = []
-    
-    # Extract Crops
     for cnt in contours:
         x, y, cw, ch = cv2.boundingRect(cnt)
-        if cw < 80 or ch < 80: continue # slightly looser filter
+        
+        # 5. AREA FILTERING
+        # Ignore small noise (less than 5% of page width)
+        if cw < (w * 0.05) or ch < (h * 0.05): 
+            continue 
         
         crop = img[y:y+ch, x:x+cw]
         success, buf = cv2.imencode(".png", crop)
