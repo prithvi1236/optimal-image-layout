@@ -66,6 +66,10 @@ const ImageCanvasStudio: React.FC = () => {
   const [pageCount, setPageCount] = useState(1);
   const [loading, setLoading] = useState(false);
   const [isReflowing, setIsReflowing] = useState(false);
+  const [loadingPages, setLoadingPages] = useState<Set<number>>(new Set());
+  const [sessionRestoring, setSessionRestoring] = useState(true);
+  const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const [showScaleSavedIndicator, setShowScaleSavedIndicator] = useState(false);
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
@@ -84,34 +88,246 @@ const ImageCanvasStudio: React.FC = () => {
 
   const hasContent = assets.length > 0;
 
-  // ================= SESSION MANAGEMENT =================
+  // ================= SESSION PERSISTENCE =================
   
-  // useEffect(() => {
-  //   // Initialize session and load session info
-  //   const initSession = async () => {
-  //     try {
-  //       const info = await sessionManager.getSessionInfo();
-  //       setSessionInfo(info);
-  //     } catch (error) {
-  //       console.error('Failed to initialize session:', error);
-  //     }
-  //   };
-    
-  //   initSession();
-  // }, []);
+  // Save state to localStorage whenever it changes
+  useEffect(() => {
+    if (assets.length > 0) {
+      localStorage.setItem('layout-assets', JSON.stringify(assets));
+    }
+  }, [assets]);
 
-  // const updateSessionInfo = async () => {
-  //   try {
-  //     const info = await sessionManager.getSessionInfo();
-  //     setSessionInfo(info);
-  //   } catch (error) {
-  //     console.error('Failed to update session info:', error);
-  //   }
-  // };
+  useEffect(() => {
+    if (layoutImages.length > 0) {
+      localStorage.setItem('layout-images', JSON.stringify(layoutImages));
+      localStorage.setItem('layout-page-count', pageCount.toString());
+    }
+  }, [layoutImages, pageCount]);
+
+  // Smart session recovery: Check server vs localStorage
+  useEffect(() => {
+    const restoreSession = async () => {
+      setSessionRestoring(true);
+      try {
+        // Get server data
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        
+        if (!token) return;
+
+        const serverResponse = await fetch(`${API_URL}/user_images`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (!serverResponse.ok) return;
+        
+        const serverData = await serverResponse.json();
+        const serverImages = serverData.images || [];
+
+        // Get localStorage data
+        const savedAssets = localStorage.getItem('layout-assets');
+        const savedLayout = localStorage.getItem('layout-images');
+        const savedPageCount = localStorage.getItem('layout-page-count');
+
+        // Decide which data to use
+        if (serverImages.length > 0) {
+          // Server has data - check if localStorage is newer/different
+          if (savedAssets) {
+            const localAssets = JSON.parse(savedAssets);
+            const localIds = new Set(localAssets.map((a: AssetItem) => a.id));
+            const serverIds = new Set(serverImages.map((img: any) => img.id));
+            
+            // If localStorage has different/more images, use it
+            if (localIds.size !== serverIds.size || 
+                ![...localIds].every(id => serverIds.has(id))) {
+              console.log('📱 Restoring from localStorage (has newer data)');
+              restoreFromLocalStorage(savedAssets, savedLayout, savedPageCount);
+              return;
+            }
+          }
+          
+          // Use server data
+          console.log('☁️ Restoring from server');
+          setAssets(serverImages);
+          setShowRecoveryToast(true);
+          setTimeout(() => setShowRecoveryToast(false), 3000);
+          
+          // If we have saved layout for these images, restore it
+          if (savedLayout && savedPageCount) {
+            const parsedLayout = JSON.parse(savedLayout);
+            const layoutImageIds = new Set(parsedLayout.map((img: LayoutItem) => img.imageId));
+            const serverImageIds = new Set(serverImages.map((img: any) => img.id));
+            
+            // Only restore layout if it matches current images
+            if ([...layoutImageIds].every(id => serverImageIds.has(id))) {
+              setLayoutImages(parsedLayout);
+              setPageCount(parseInt(savedPageCount));
+              preloadImages(parsedLayout);
+            } else {
+              // Generate fresh layout for server images
+              await generateLayoutStreaming(serverImages);
+            }
+          } else {
+            // No saved layout, generate fresh
+            await generateLayoutStreaming(serverImages);
+          }
+          
+        } else if (savedAssets) {
+          // No server data, but localStorage has data
+          console.log('📱 Restoring from localStorage (server empty)');
+          restoreFromLocalStorage(savedAssets, savedLayout, savedPageCount);
+        }
+        
+      } catch (error) {
+        console.error('Failed to restore session:', error);
+        clearCorruptedData();
+      } finally {
+        setSessionRestoring(false);
+      }
+    };
+
+    const restoreFromLocalStorage = (savedAssets: string, savedLayout: string | null, savedPageCount: string | null) => {
+      const parsedAssets = JSON.parse(savedAssets);
+      setAssets(parsedAssets);
+      setShowRecoveryToast(true);
+      setTimeout(() => setShowRecoveryToast(false), 3000);
+      
+      if (savedLayout && savedPageCount) {
+        const parsedLayout = JSON.parse(savedLayout);
+        setLayoutImages(parsedLayout);
+        setPageCount(parseInt(savedPageCount));
+        preloadImages(parsedLayout);
+      } else {
+        generateLayoutStreaming(parsedAssets);
+      }
+    };
+
+    const preloadImages = (layout: LayoutItem[]) => {
+      layout.forEach((img: LayoutItem) => {
+        if (!loadedImages[img.imageId]) {
+          const im = new Image();
+          im.crossOrigin = "anonymous";
+          im.src = img.url;
+          im.onload = () =>
+            setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
+        }
+      });
+    };
+
+    const clearCorruptedData = () => {
+      localStorage.removeItem('layout-assets');
+      localStorage.removeItem('layout-images');
+      localStorage.removeItem('layout-page-count');
+    };
+
+    restoreSession();
+  }, []); // Only run on mount
 
   // ================= API =================
 
-  // 1. GENERATE LAYOUT
+  // 1. STREAMING LAYOUT GENERATION
+  const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) => {
+    if (currentAssets.length === 0) {
+      setLayoutImages([]);
+      setPageCount(1);
+      return;
+    }
+
+    setLoading(true);
+    setLayoutImages([]); // Clear existing layout
+    setPageCount(0); // Reset page count
+    setLoadingPages(new Set([1])); // Start with page 1 loading
+    
+    try {
+      const payloadItems = currentAssets.map((a) => ({
+        id: a.id,
+        scale: a.scale,
+      }));
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      // Use streaming fetch for progressive updates
+      const response = await fetch(`${API_URL}/layout_stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ items: payloadItems, margin: 40, gap: 20 })
+      });
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'page') {
+                // Add new page items progressively
+                const newLayoutItems: LayoutItem[] = data.items.map((item: any) => ({
+                  layoutId: `${item.image_id}-${data.page}-${Math.random()}`,
+                  imageId: item.image_id,
+                  url: item.url,
+                  x: item.x,
+                  y: item.y,
+                  width: item.width,
+                  height: item.height,
+                  page: data.page,
+                }));
+
+                // Update layout progressively
+                setLayoutImages(prev => [...prev, ...newLayoutItems]);
+                setPageCount(prev => Math.max(prev, data.page));
+                
+                // Mark this page as loaded, add next page as loading
+                setLoadingPages(prev => {
+                  const newSet = new Set(prev);
+                  newSet.delete(data.page);
+                  newSet.add(data.page + 1);
+                  return newSet;
+                });
+                
+                // Preload images for this page
+                newLayoutItems.forEach(img => {
+                  if (!loadedImages[img.imageId]) {
+                    const im = new Image();
+                    im.crossOrigin = "anonymous";
+                    im.src = img.url;
+                    im.onload = () =>
+                      setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
+                  }
+                });
+
+              } else if (data.type === 'complete') {
+                setPageCount(data.total_pages);
+                setLoadingPages(new Set()); // Clear all loading states
+                setLoading(false);
+              }
+            } catch (e) {
+              console.error('Error parsing streaming data:', e);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Streaming layout error:", err);
+      setLoading(false);
+    }
+  }, [loadedImages]);
+
+  // 2. FALLBACK: Original layout generation for compatibility
  const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
   if (currentAssets.length === 0) {
     setLayoutImages([]);
@@ -203,7 +419,7 @@ const ImageCanvasStudio: React.FC = () => {
     );
 
     // Trigger optimized reflow for remaining items
-    await generateLayout(updatedAssets);
+    await generateLayoutStreaming(updatedAssets);
   } catch (err) {
     console.error("Deletion sync error:", err);
   } finally {
@@ -252,7 +468,7 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
     setAssets(updatedAll);
     
     // Always let the server decide the layout for the whole batch
-    await generateLayout(updatedAll);
+    await generateLayoutStreaming(updatedAll);
   } catch (err) {
     console.error("Upload error:", err);
   } finally {
@@ -262,20 +478,25 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
 
 
 
-  // 4. IMAGE LOADING
+  // 4. OPTIMIZED IMAGE LOADING WITH PRELOADING
   useEffect(() => {
-  if (layoutImages.length === 0) return;
+    if (layoutImages.length === 0) return;
 
-  layoutImages.forEach(img => {
-    if (loadedImages[img.imageId]) return;
+    // Preload images for current and next page
+    const currentPageImages = layoutImages.filter(img => 
+      img.page === activePageIndex || img.page === activePageIndex + 1
+    );
 
-    const im = new Image();
-    im.crossOrigin = "anonymous";
-    im.src = img.url;
-    im.onload = () =>
-      setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
-  });
-}, [layoutImages, loadedImages]);
+    currentPageImages.forEach(img => {
+      if (loadedImages[img.imageId]) return;
+
+      const im = new Image();
+      im.crossOrigin = "anonymous";
+      im.src = img.url;
+      im.onload = () =>
+        setLoadedImages(prev => ({ ...prev, [img.imageId]: im }));
+    });
+  }, [layoutImages, loadedImages, activePageIndex]);
 
   // Update layout locally (visual only)
   const updateLocalLayout = (layoutId: string, updates: Partial<LayoutItem>) => {
@@ -540,7 +761,12 @@ if (selectedLayoutId === img.layoutId) {
     );
 
     setAssets(updatedAssets);
-    generateLayout(updatedAssets);
+    
+    // Show scale saved indicator
+    setShowScaleSavedIndicator(true);
+    setTimeout(() => setShowScaleSavedIndicator(false), 1500);
+    
+    generateLayoutStreaming(updatedAssets);
   }
 
   setInteraction(null);
@@ -647,6 +873,7 @@ if (selectedLayoutId === img.layoutId) {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto p-4 space-y-5 bg-zinc-50/30">
+            {/* Render existing pages */}
             {Array.from({ length: pageCount }).map((_, idx) => (
               <div
                 key={idx}
@@ -682,27 +909,99 @@ if (selectedLayoutId === img.layoutId) {
                 </span>
               </div>
             ))}
+            
+            {/* Render loading pages */}
+            {Array.from(loadingPages).map((pageNum) => (
+              <div
+                key={`loading-${pageNum}`}
+                className="group flex flex-col items-center gap-2 opacity-50"
+              >
+                <div className="relative border-2 border-dashed border-zinc-300 rounded bg-zinc-50 overflow-hidden shadow-sm w-[119px] h-[168px] flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 size={20} className="animate-spin text-indigo-500" />
+                    <span className="text-xs text-zinc-500">Generating...</span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-zinc-400">
+                  Page {pageNum}
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
         {/* Coffee button at bottom of sidebar */}
         <div className="p-4 border-t border-zinc-200 bg-white">
           <SidebarCoffeeButton />
+          
+          {/* Debug: Show saved scales (remove in production) */}
+          {assets.length > 0 && (
+            <div className="mt-2 text-xs text-zinc-400">
+              <div className="font-mono">Scales saved locally:</div>
+              {assets.slice(0, 3).map(asset => (
+                <div key={asset.id} className="truncate">
+                  {asset.id.slice(0, 8)}... → {asset.scale.toFixed(2)}x
+                </div>
+              ))}
+              {assets.length > 3 && <div>+{assets.length - 3} more...</div>}
+            </div>
+          )}
         </div>
       </aside>
 
       {/* MAIN AREA */}
       <main className="flex-1 flex flex-col bg-zinc-200/50 overflow-hidden relative">
+        {/* Recovery Toast */}
+        {showRecoveryToast && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 bg-emerald-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="text-sm font-medium">Session restored successfully!</span>
+          </div>
+        )}
+
+        {/* Scale Saved Indicator */}
+        {showScaleSavedIndicator && (
+          <div className="absolute top-4 right-4 z-50 bg-blue-500 text-white px-3 py-1.5 rounded-md shadow-lg flex items-center gap-2 animate-in slide-in-from-right-2">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span className="text-xs font-medium">Size saved</span>
+          </div>
+        )}
+
         <header className="h-14 bg-white border-b border-zinc-200 px-6 flex items-center justify-between z-10 shadow-sm">
           <div className="flex items-center gap-2">
-            {loading ? (
-              <Loader2 size={16} className="animate-spin text-indigo-600" />
+            {sessionRestoring ? (
+              <>
+                <Loader2 size={16} className="animate-spin text-emerald-600" />
+                <span className="text-xs font-bold text-zinc-500">
+                  Restoring Session...
+                </span>
+              </>
+            ) : loading || loadingPages.size > 0 ? (
+              <>
+                <Loader2 size={16} className="animate-spin text-indigo-600" />
+                <span className="text-xs font-bold text-zinc-500">
+                  {loadingPages.size > 0 
+                    ? `Generating Page ${Math.min(...loadingPages)}...` 
+                    : "Processing Images..."}
+                </span>
+                {pageCount > 0 && (
+                  <span className="text-xs text-zinc-400">
+                    ({pageCount} pages ready)
+                  </span>
+                )}
+              </>
             ) : (
-              <RefreshCw size={16} className="text-indigo-600" />
+              <>
+                <RefreshCw size={16} className="text-indigo-600" />
+                <span className="text-xs font-bold text-zinc-500">
+                  Layout Complete ({pageCount} pages)
+                </span>
+              </>
             )}
-            <span className="text-xs font-bold text-zinc-500">
-              {loading ? "Optimizing Layout..." : "Smart Reflow Active"}
-            </span>
           </div>
           <div className="flex items-center gap-3 bg-zinc-100 rounded-full px-4 py-1.5 border border-zinc-200">
             <ZoomOut
@@ -739,6 +1038,10 @@ if (selectedLayoutId === img.layoutId) {
                 setAssets([]);
                 setPageCount(1);
                 setLayoutImages([]);
+                // Clear localStorage
+                localStorage.removeItem('layout-assets');
+                localStorage.removeItem('layout-images');
+                localStorage.removeItem('layout-page-count');
               }}
               className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
               title="Clear All & Reset Session"
