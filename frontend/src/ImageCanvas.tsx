@@ -547,14 +547,17 @@ const handleUpload = async (uploadedFile: File, extractFigures = false) => {
       ctx.save();
       ctx.scale(SCALE, SCALE);
       pageItems.forEach((img) => {
-        const im = loadedImages[img.imageId];
+  const im = loadedImages[img.imageId];
 
-        if (im) ctx.drawImage(im, img.x, img.y, img.width, img.height);
-        else {
-          ctx.fillStyle = "#e5e7eb";
-          ctx.fillRect(img.x, img.y, img.width, img.height);
-        }
-      });
+  if (im) {
+    // Force the image to stay within the margins visually
+    // even if the coordinate data is slightly off
+    const safeX = Math.max(MARGIN, Math.min(img.x, A4_WIDTH - MARGIN - img.width));
+    const safeY = Math.max(MARGIN, Math.min(img.y, A4_HEIGHT - MARGIN - img.height));
+    
+    ctx.drawImage(im, safeX, safeY, img.width, img.height);
+  }
+});
       ctx.restore();
     }, [pageItems, loadedImages]);
 
