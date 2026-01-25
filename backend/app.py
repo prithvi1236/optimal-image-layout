@@ -242,148 +242,100 @@ def extract_img():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# --- ROUTE: ONE-SHOT LAYOUT (FAST) ---
-@app.route("/layout", methods=["POST"])
-def create_layout_fast():
-    user_id = get_user_id_from_auth()
-    if not user_id: return jsonify({"error": "Unauthorized"}), 401
-    
-    data = request.get_json()
-    items = data.get("items", [])
-    if not items: return jsonify({"layout": {}, "page_count": 0})
-    
-    margin, gap = data.get("margin", 40), data.get("gap", 20)
-    
-    # 1. Fetch metadata
-    item_ids = [it["id"] for it in items]
-    db_imgs = supabase.table("images").select("*").in_("id", item_ids).execute()
-    img_map = {img["id"]: img for img in db_imgs.data}
-
-    # 2. Prep Rectangles
-    # FIX: Subtract margins from the bin size so images stay inside the visible page
-    max_w, max_h = A4_WIDTH - (2 * margin), A4_HEIGHT - (2 * margin)
-    rects_to_pack = []
-    total_area = 0
-
-    for it in items:
-        img = img_map.get(it["id"])
-        if not img: continue
-        
-        scale = it.get("scale", 1)
-        w, h = int(img["width"] * scale), int(img["height"] * scale)
-        
-        # FIX: Ensure image + gap doesn't exceed the USABLE area
-        limit_w, limit_h = max_w - gap, max_h - gap
-        if w > limit_w or h > limit_h:
-            ratio = min(limit_w / w, limit_h / h)
-            w, h = int(w * ratio), int(h * ratio)
-            
-        rects_to_pack.append((w + gap, h + gap, it["id"]))
-        total_area += (w + gap) * (h + gap)
-
-    # 3. One-Shot Packing
-    estimated_pages = math.ceil(total_area / (max_w * max_h)) + 5
-    packer = newPacker(mode=PackingMode.Offline, pack_algo=MaxRectsBssf, sort_algo=SORT_DIFF)
-    
-    # FIX: Use the calculated usable area as the bin size
-    for _ in range(estimated_pages): packer.add_bin(max_w, max_h)
-    for r in rects_to_pack: packer.add_rect(*r)
-    
-    packer.pack()
-    
-    # 4. Format
-    res_layout = {}
-    for b, x, y, w, h, rid in packer.rect_list():
-        # Final safety: If rectpack returned a coordinate that pushes the width out
-        # (Though with the fix above, rid will be within 0 -> max_w)
-        url = get_url(img_map[rid]["storage_path"])
-        res_layout.setdefault(b + 1, []).append({
-            "image_id": rid, 
-            "x": x + margin, # Apply the offset after packing
-            "y": y + margin,
-            "width": w - gap, 
-            "height": h - gap, 
-            "url": url
-        })
-
-    return jsonify({"layout": res_layout, "page_count": len(res_layout)})
-
 # --- ROUTE: STREAMING LAYOUT (UX) ---
 @app.route("/layout_stream", methods=["POST"])
 def create_layout_stream():
     user_id = get_user_id_from_auth()
-    if not user_id: return jsonify({"error": "Unauthorized"}), 401
-    
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
     data = request.get_json()
     items = data.get("items", [])
-    margin, gap = data.get("margin", 40), data.get("gap", 20)
-    
+    margin = int(data.get("margin", 40))
+    gap = int(data.get("gap", 20))
+
+    if not items:
+        return jsonify({"type": "complete", "total_pages": 0})
+
+    # Fetch images
     item_ids = [it["id"] for it in items]
     db_imgs = supabase.table("images").select("*").in_("id", item_ids).execute()
     img_map = {img["id"]: img for img in db_imgs.data}
 
     def generate():
-        # FIX: Calculate internal usable area
-        max_w, max_h = A4_WIDTH - (2 * margin), A4_HEIGHT - (2 * margin)
-        
-        rects = []
+        usable_w = A4_WIDTH - 2 * margin
+        usable_h = A4_HEIGHT - 2 * margin
+
+        # ---- PREP RECTANGLES (TRUTHFUL) ----
+        remaining = []
         for it in items:
             img = img_map.get(it["id"])
-            if not img: continue
-            scale = it.get("scale", 1)
-            w, h = int(img["width"] * scale), int(img["height"] * scale)
-            
-            # FIX: Check against usable area minus gap
-            limit_w, limit_h = max_w - gap, max_h - gap
-            if w > limit_w or h > limit_h:
-                ratio = min(limit_w / w, limit_h / h)
-                w, h = int(w * ratio), int(h * ratio)
-            
-            rects.append({
-                "w": w + gap, "h": h + gap, "id": it["id"], 
-                "final_w": w, "final_h": h, "path": img["storage_path"]
+            if not img:
+                continue
+
+            scale = float(it.get("scale", 1.0))
+            w = int(img["width"] * scale)
+            h = int(img["height"] * scale)
+
+            if w > usable_w or h > usable_h:
+                ratio = min(usable_w / w, usable_h / h)
+                w = int(w * ratio)
+                h = int(h * ratio)
+
+            remaining.append({
+                "id": it["id"],
+                "w": w,
+                "h": h,
+                "path": img["storage_path"]
             })
 
-        rects.sort(key=lambda x: x["h"], reverse=True)
-        remaining = rects[:]
         page_num = 1
-        
+
         while remaining:
-            # FIX: Pack inside usable area bin
-            packer = newPacker(mode=PackingMode.Offline, pack_algo=MaxRectsBssf, sort_algo=SORT_NONE)
-            packer.add_bin(max_w, max_h)
-            
+            packer = newPacker(
+                mode=PackingMode.Offline,
+                pack_algo=MaxRectsBssf,
+                sort_algo=SORT_DIFF
+            )
+
+            packer.add_bin(usable_w, usable_h)
+
             for r in remaining:
                 packer.add_rect(r["w"], r["h"], r["id"])
-            
+
             packer.pack()
-            
-            packed_on_page = []
+
             placed_ids = set()
-            
+            page_items = []
+
             for b, x, y, w, h, rid in packer.rect_list():
-                if b == 0:
-                    r_data = next(r for r in remaining if r["id"] == rid)
-                    packed_on_page.append({
-                        "image_id": rid,
-                        "x": x + margin, # Offset by margin
-                        "y": y + margin,
-                        "width": r_data["final_w"],
-                        "height": r_data["final_h"],
-                        "url": get_url(r_data["path"])
-                    })
-                    placed_ids.add(rid)
-            
-            if packed_on_page:
-                yield f"data: {json.dumps({'type': 'page', 'page': page_num, 'items': packed_on_page})}\n\n"
-                page_num += 1
-                remaining = [r for r in remaining if r["id"] not in placed_ids]
-            else:
-                break 
+                if b != 0:
+                    continue
+
+                r = next(r for r in remaining if r["id"] == rid)
+
+                page_items.append({
+                    "image_id": rid,
+                    "x": x + margin + gap // 2,
+                    "y": y + margin + gap // 2,
+                    "width": w - gap,
+                    "height": h - gap,
+                    "url": get_url(r["path"])
+                })
+
+                placed_ids.add(rid)
+
+            if not page_items:
+                break
+
+            yield f"data: {json.dumps({'type': 'page', 'page': page_num, 'items': page_items})}\n\n"
+
+            remaining = [r for r in remaining if r["id"] not in placed_ids]
+            page_num += 1
 
         yield f"data: {json.dumps({'type': 'complete', 'total_pages': page_num - 1})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(generate(), mimetype="text/event-stream")
 
 # --- USER DATA & CLEANUP ---
 @app.route("/user_images", methods=["GET"])
