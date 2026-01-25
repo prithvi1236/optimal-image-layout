@@ -4,3 +4,4 @@ uploads
 temp_uploads
 extracted
 .env
+__pycache__
