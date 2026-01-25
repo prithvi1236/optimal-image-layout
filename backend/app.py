@@ -1,4 +1,4 @@
-import os, io, uuid, traceback, json, math, time
+import os, io, uuid, traceback, json, math, time, atexit
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import fitz  # PyMuPDF
@@ -9,6 +9,7 @@ import numpy as np
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from cleanup_service import CleanupService
 
 load_dotenv()
 
@@ -33,6 +34,9 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# Initialize cleanup service
+cleanup_service = CleanupService(supabase, SUPABASE_BUCKET)
+
 app = Flask(__name__)
 
 # Flask built-in protection for file size
@@ -41,6 +45,12 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 CORS(app, resources={r"/*": {"origins": ["http://localhost:5173"]}}, 
      allow_headers=["Content-Type", "Authorization"], supports_credentials=True)
 
+# Start cleanup scheduler when app starts
+cleanup_service.start_cleanup_scheduler()
+
+# Ensure cleanup stops when app shuts down
+atexit.register(cleanup_service.stop_cleanup_scheduler)
+
 # --- AUTH HELPER ---
 def get_user_id_from_auth():
     auth_header = request.headers.get("Authorization")
@@ -48,7 +58,13 @@ def get_user_id_from_auth():
     try:
         token = auth_header.replace("Bearer ", "")
         user = supabase.auth.get_user(token)
-        return user.user.id if user and user.user else None
+        user_id = user.user.id if user and user.user else None
+        
+        # Update user activity whenever they make an authenticated request
+        if user_id:
+            cleanup_service.update_user_activity(user_id)
+            
+        return user_id
     except Exception:
         return None
 
@@ -400,6 +416,74 @@ def delete_image():
         supabase.table("images").delete().eq("id", img_id).execute()
         
     return jsonify({"success": True})
+
+# --- CLEANUP ENDPOINTS ---
+@app.route("/logout", methods=["POST"])
+def logout_user():
+    """Handle user logout and cleanup their data"""
+    user_id = get_user_id_from_auth()
+    if not user_id: return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        # Clean up all user data
+        cleanup_service.cleanup_user_data(user_id)
+        return jsonify({"success": True, "message": "User data cleaned up successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/delete_all_data", methods=["POST"])
+def delete_all_user_data():
+    """Handle manual deletion of all user data (dustbin button)"""
+    user_id = get_user_id_from_auth()
+    if not user_id: return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        # Clean up all user data
+        cleanup_service.cleanup_user_data(user_id)
+        return jsonify({"success": True, "message": "All user data deleted successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/user_activity", methods=["GET"])
+def get_user_activity():
+    """Get user activity status"""
+    user_id = get_user_id_from_auth()
+    if not user_id: return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        activity_status = cleanup_service.get_user_activity_status(user_id)
+        return jsonify(activity_status or {"message": "No activity data found"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/ping", methods=["POST"])
+def ping_activity():
+    """Update user activity (heartbeat endpoint)"""
+    user_id = get_user_id_from_auth()
+    if not user_id: return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cleanup_service.update_user_activity(user_id)
+        return jsonify({"success": True, "timestamp": time.time()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/cleanup_stats", methods=["GET"])
+def get_cleanup_stats():
+    """Get cleanup statistics (admin/debug endpoint)"""
+    user_id = get_user_id_from_auth()
+    if not user_id: return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        # Manual cleanup run for testing
+        cleaned_count = cleanup_service.cleanup_inactive_users()
+        return jsonify({
+            "cleaned_users": cleaned_count,
+            "cleanup_interval": cleanup_service.cleanup_interval,
+            "inactivity_threshold": cleanup_service.inactivity_threshold
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5002, debug=True, threaded=True)

@@ -2,13 +2,25 @@ import { useEffect, useState } from "react";
 import ImageCanvasStudio from "./ImageCanvas";
 import Login from "./Components/Login";
 import { supabase } from "./Components/supabaseClient";
+import { cleanupService } from "./cleanupService";
 import type { Session } from "@supabase/supabase-js";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
 
   useEffect(() => {
+    // Setup cleanup service callbacks
+    cleanupService.setInactivityWarningCallback(() => {
+      setShowInactivityWarning(true);
+    });
+
+    cleanupService.setDataCleanupCallback(() => {
+      // Refresh the page or redirect after cleanup
+      window.location.reload();
+    });
+
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -28,10 +40,28 @@ function App() {
           window.history.replaceState(null, '', window.location.pathname);
         }
       }
+
+      // Handle sign out
+      if (event === 'SIGNED_OUT') {
+        setShowInactivityWarning(false);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      cleanupService.destroy();
+    };
   }, []);
+
+  const handleStayActive = () => {
+    cleanupService.resetActivityTimer();
+    setShowInactivityWarning(false);
+  };
+
+  const handleLogoutNow = async () => {
+    setShowInactivityWarning(false);
+    await cleanupService.handleLogout();
+  };
 
   if (loading) {
     return (
@@ -109,6 +139,39 @@ function App() {
   return (
     <div className="w-screen h-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden selection:bg-indigo-100 selection:text-indigo-700">
       <ImageCanvasStudio />
+      
+      {/* Inactivity Warning Modal */}
+      {showInactivityWarning && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md mx-4 shadow-2xl">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-zinc-900 mb-2">Inactivity Warning</h3>
+              <p className="text-zinc-600 mb-6">
+                You've been inactive for 50 minutes. Your data will be automatically deleted in 10 minutes due to inactivity.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleLogoutNow}
+                  className="flex-1 px-4 py-2 text-zinc-600 border border-zinc-300 rounded-lg hover:bg-zinc-50 transition-colors"
+                >
+                  Logout Now
+                </button>
+                <button
+                  onClick={handleStayActive}
+                  className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                  Stay Active
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

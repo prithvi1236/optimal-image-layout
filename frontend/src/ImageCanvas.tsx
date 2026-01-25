@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { jsPDF } from "jspdf";
 import { supabase } from "./Components/supabaseClient";
+import { cleanupService } from "./cleanupService";
 import {
   Upload,
   Download,
@@ -65,12 +66,10 @@ const ImageCanvasStudio: React.FC = () => {
   const [layoutImages, setLayoutImages] = useState<LayoutItem[]>([]);
   const [pageCount, setPageCount] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [isReflowing, setIsReflowing] = useState(false);
   const [loadingPages, setLoadingPages] = useState<Set<number>>(new Set());
   const [sessionRestoring, setSessionRestoring] = useState(true);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
   const [showScaleSavedIndicator, setShowScaleSavedIndicator] = useState(false);
-  const [pendingLayout, setPendingLayout] = useState<LayoutItem[]>([]);
   const [loadedImages, setLoadedImages] = useState<
     Record<string, HTMLImageElement>
   >({});
@@ -236,7 +235,6 @@ const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) =
 
   // FIX 1: Don't clear setLayoutImages([]) here. 
   // We keep the old layout visible so the screen doesn't go blank (blink).
-  setIsReflowing(true);
   setLoading(true);
   
   // Start with page 1 loading indicator
@@ -319,7 +317,6 @@ const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) =
               setPageCount(data.total_pages);
               setLoadingPages(new Set()); 
               setLoading(false);
-              setIsReflowing(false);
             }
           } catch (e) {
             console.error('Error parsing streaming data:', e);
@@ -330,59 +327,8 @@ const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) =
   } catch (err) {
     console.error("Streaming layout error:", err);
     setLoading(false);
-    setIsReflowing(false);
   }
 }, [loadedImages]);
-
-  // 2. FALLBACK: Original layout generation for compatibility
- const generateLayout = useCallback(async (currentAssets: AssetItem[]) => {
-  if (currentAssets.length === 0) {
-    setLayoutImages([]);
-    setPageCount(1);
-    return;
-  }
-
-  setLoading(true);
-  try {
-    const payloadItems = currentAssets.map((a) => ({
-      id: a.id,
-      scale: a.scale,
-    }));
-
-    // 1. Get Token
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-
-    // 2. Post to /layout with Auth header
-    const response = await axios.post(`${API_URL}/layout`, 
-      { items: payloadItems, margin: 40, gap: 20 },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    const newLayout: LayoutItem[] = [];
-    Object.entries(response.data.layout).forEach(([page, items]: any) => {
-      items.forEach((it: any) => {
-        newLayout.push({
-          layoutId: `${it.image_id}-${page}-${Math.random()}`,
-          imageId: it.image_id,
-          url: it.url,
-          x: it.x,
-          y: it.y,
-          width: it.width,
-          height: it.height,
-          page: Number(page),
-        });
-      });
-    });
-
-    setLayoutImages(newLayout);
-    setPageCount(response.data.page_count || 1);
-  } catch (err) {
-    console.error("Layout error:", err);
-  } finally {
-    setLoading(false);
-  }
-}, []);
 
   // 2. DELETE IMAGE (Frontend + Backend)
   // const handleDelete = async (idToDelete: string) => {
@@ -414,7 +360,6 @@ const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) =
   setLayoutImages(prev => prev.filter(li => li.imageId !== imageIdToDelete));
   setSelectedLayoutId(null);
 
-  setIsReflowing(true);
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
@@ -429,24 +374,11 @@ const generateLayoutStreaming = useCallback(async (currentAssets: AssetItem[]) =
     await generateLayoutStreaming(updatedAssets);
   } catch (err) {
     console.error("Deletion sync error:", err);
-  } finally {
-    setIsReflowing(false);
   }
 };
 
 
   const MARGIN = 40;
-const GAP = 20;
-
-const getLastPageCursor = (page: number) => {
-  const items = layoutImages.filter(i => i.page === page);
-  let y = MARGIN;
-  items.forEach(img => {
-    y = Math.max(y, img.y + img.height + GAP);
-  });
-  return y;
-};
-
 
   // 3. UPLOAD
 const handleUpload = async (uploadedFile: File, extractFigures = false) => {
@@ -1032,10 +964,10 @@ if (selectedLayoutId === img.layoutId) {
             <BuyMeACoffee className="mr-2" />
             <button
               onClick={async () => {
-                await supabase.auth.signOut();
+                await cleanupService.handleLogout();
               }}
               className="p-2 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-600 rounded-lg transition-colors"
-              title="Sign Out"
+              title="Logout & Delete Data"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -1044,17 +976,21 @@ if (selectedLayoutId === img.layoutId) {
               </svg>
             </button>
             <button
-              onClick={() => {
-                setAssets([]);
-                setPageCount(1);
-                setLayoutImages([]);
-                // Clear localStorage
-                localStorage.removeItem('layout-assets');
-                localStorage.removeItem('layout-images');
-                localStorage.removeItem('layout-page-count');
+              onClick={async () => {
+                const success = await cleanupService.deleteAllData();
+                if (success) {
+                  // Clear local state
+                  setAssets([]);
+                  setPageCount(1);
+                  setLayoutImages([]);
+                  // Clear localStorage
+                  localStorage.removeItem('layout-assets');
+                  localStorage.removeItem('layout-images');
+                  localStorage.removeItem('layout-page-count');
+                }
               }}
               className="p-2 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded-lg transition-colors"
-              title="Clear All & Reset Session"
+              title="Delete All Data"
             >
               <Trash2 size={18} />
             </button>

@@ -149,3 +149,40 @@ https://your-frontend-service.onrender.com
 - HTTPS enforced by default
 - Regular dependency updates
 - Input validation and sanitization
+
+## User Data Cleanup System
+
+The application includes an automatic cleanup system for user data management:
+
+### Database Setup Required
+Before deployment, ensure the cleanup schema is applied to your Supabase database:
+
+1. **Run Cleanup Schema**
+   ```sql
+   -- Execute the contents of backend/cleanup_schema.sql in your Supabase SQL editor
+   ```
+
+2. **Verify Functions**
+   - `cleanup_inactive_users()` - Removes inactive user data
+   - `update_user_activity()` - Tracks user activity
+   - `cleanup_user_data()` - Manual user data cleanup
+
+### Cleanup Features
+- **Automatic**: Cleans up user data after 1 hour of inactivity
+- **Warning**: Shows warning at 50 minutes of inactivity
+- **Manual**: Logout and delete buttons for immediate cleanup
+- **Background**: Runs cleanup every 5 minutes automatically
+
+### Environment Variables
+Add these to your backend service if you want to customize cleanup timing:
+```
+CLEANUP_INTERVAL=300          # 5 minutes (in seconds)
+INACTIVITY_THRESHOLD=3600     # 1 hour (in seconds)
+```
+
+### Monitoring Cleanup
+- Access `/cleanup_stats` endpoint for cleanup statistics
+- Check backend logs for cleanup operations
+- Monitor Supabase storage usage
+
+For detailed cleanup system documentation, see `CLEANUP_SYSTEM.md`.
