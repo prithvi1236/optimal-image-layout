@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react";
 import BuyMeACoffee from "./BuyMeACoffee";
-import SidebarCoffeeButton from "./SidebarCoffeeButton";
 // import { sessionManager } from "./sessionManager";
 
 
@@ -871,24 +870,6 @@ if (selectedLayoutId === img.layoutId) {
             ))}
           </div>
         )}
-
-        {/* Coffee button at bottom of sidebar */}
-        <div className="p-4 border-t border-zinc-200 bg-white">
-          <SidebarCoffeeButton />
-          
-          {/* Debug: Show saved scales (remove in production) */}
-          {assets.length > 0 && (
-            <div className="mt-2 text-xs text-zinc-400">
-              <div className="font-mono">Scales saved locally:</div>
-              {assets.slice(0, 3).map(asset => (
-                <div key={asset.id} className="truncate">
-                  {asset.id.slice(0, 8)}... → {asset.scale.toFixed(2)}x
-                </div>
-              ))}
-              {assets.length > 3 && <div>+{assets.length - 3} more...</div>}
-            </div>
-          )}
-        </div>
       </aside>
 
       {/* MAIN AREA */}
@@ -1007,9 +988,6 @@ if (selectedLayoutId === img.layoutId) {
 
         {!hasContent ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8">
-            <div className="absolute top-6 right-6">
-              <BuyMeACoffee />
-            </div>
             <h1 className="text-4xl font-black mb-6 text-zinc-800">
               Smart Layout Studio
             </h1>
