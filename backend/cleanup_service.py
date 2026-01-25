@@ -16,13 +16,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class CleanupService:
+    _instance = None
+    
     def __init__(self, supabase_client: Client, bucket_name: str = "assets"):
+        if CleanupService._instance is not None:
+            raise Exception("CleanupService is a singleton. Use get_instance() method.")
+        
         self.supabase = supabase_client
         self.bucket_name = bucket_name
         self.cleanup_interval = 300  # 5 minutes
         self.inactivity_threshold = 3600  # 1 hour in seconds
         self._cleanup_thread = None
         self._stop_cleanup = False
+        CleanupService._instance = self
+    
+    @classmethod
+    def get_instance(cls):
+        """Get the singleton instance"""
+        return cls._instance
+    
+    @classmethod
+    def create_instance(cls, supabase_client: Client, bucket_name: str = "assets"):
+        """Create the singleton instance"""
+        if cls._instance is None:
+            cls._instance = cls(supabase_client, bucket_name)
+        return cls._instance
         
     def start_cleanup_scheduler(self):
         """Start the background cleanup scheduler"""

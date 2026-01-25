@@ -4,17 +4,11 @@
  */
 
 import { supabase } from './Components/supabaseClient';
+import type { UserActivityStatus } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const ACTIVITY_PING_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const INACTIVITY_WARNING_TIME = 50 * 60 * 1000; // 50 minutes (10 min before cleanup)
-
-export interface UserActivityStatus {
-  user_id: string;
-  last_activity: string;
-  inactive_duration_seconds: number;
-  is_inactive: boolean;
-}
 
 export class CleanupService {
   private activityTimer: number | null = null;
