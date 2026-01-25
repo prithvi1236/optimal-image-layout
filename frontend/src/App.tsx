@@ -17,7 +17,7 @@ function App() {
     });
 
     cleanupService.setDataCleanupCallback(() => {
-      // Refresh the page or redirect after cleanup
+      // Refresh the page after cleanup (localStorage already cleared by cleanup service)
       window.location.reload();
     });
 

@@ -136,6 +136,19 @@ export class CleanupService {
   }
 
   /**
+   * Clear all localStorage data
+   */
+  private clearLocalStorage() {
+    try {
+      localStorage.removeItem('layout-assets');
+      localStorage.removeItem('layout-images');
+      localStorage.removeItem('layout-page-count');
+    } catch (error) {
+      console.warn('Error clearing localStorage:', error);
+    }
+  }
+
+  /**
    * Handle user logout with data cleanup
    */
   async handleLogout(): Promise<boolean> {
@@ -158,6 +171,9 @@ export class CleanupService {
 
       // Sign out from Supabase
       await supabase.auth.signOut();
+      
+      // Clear localStorage
+      this.clearLocalStorage();
       
       // Stop activity tracking
       this.stopActivityTracking();
