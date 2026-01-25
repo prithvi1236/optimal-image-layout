@@ -22,10 +22,12 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
     
     # CORS setup
+    # Note: supports_credentials=False is required when using origins=["*"].
+    # Auth uses Bearer tokens in Authorization header, not cookies, so credentials mode is not needed.
     CORS(app, 
          resources={r"/*": {"origins": CORS_ORIGINS}}, 
          allow_headers=CORS_HEADERS, 
-         supports_credentials=True)
+         supports_credentials=False)
     
     # Initialize cleanup service
     supabase = get_supabase_client()
