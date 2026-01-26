@@ -80,7 +80,7 @@ function App() {
         <div className="max-w-4xl mx-auto px-6 text-center">
           {/* Hero Section */}
           <div className="mb-12">
-            <h1 className="text-6xl font-black text-zinc-900 mb-6 leading-tight">
+            <h1 className="text-6xl font-black text-zinc-900  leading-tight py-8">
               Smart Layout
               <span className="block text-indigo-600">Studio</span>
             </h1>
