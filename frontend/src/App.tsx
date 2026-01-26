@@ -4,7 +4,6 @@ import Login from "./Components/Login";
 import { supabase } from "./Components/supabaseClient";
 import { cleanupService } from "./cleanupService";
 import type { Session } from "@supabase/supabase-js";
-import logoWeb from "../public/logo_web.png";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -127,7 +126,7 @@ function App() {
           <div className="relative z-10 flex flex-col items-center p-8">
              <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-zinc-200/50 border border-white ring-1 ring-zinc-50 transform transition-transform duration-700 hover:scale-105">
                 <img 
-                  src={logoWeb} 
+                  src="/logo_web.png" 
                   alt="Gridly Logo" 
                   className="w-32 h-32 xl:w-40 xl:h-40 object-contain"
                 />
