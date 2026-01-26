@@ -8,7 +8,7 @@ interface MainCanvasProps {
   pageCount: number;
   viewZoom: number;
   layoutImages: LayoutItem[];
-  onFileUpload: (file: File) => void;
+  onFileUpload: (file: File, extractFigures?: boolean) => void;
   onImageUpdate?: (imageId: string, updates: Partial<LayoutItem>) => void;
   onImageDelete?: (imageId: string) => void;
   generateLayoutStreaming?: (assets: any[]) => Promise<void>;
@@ -142,57 +142,93 @@ const MainCanvas = React.forwardRef<HTMLDivElement, MainCanvasProps>(({
         <h1 className="text-4xl font-black mb-6 text-zinc-800">
           Smart Layout Studio
         </h1>
-        <div className="relative group w-full max-w-lg perspective-1000 mx-auto">
-  {/* 1. Floating Decorative Elements (Abstract 'Files') */}
-  <div className="absolute -left-12 top-10 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 -rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:-translate-x-4 transition-all duration-500 delay-75"></div>
-  <div className="absolute -right-12 top-20 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:translate-x-4 transition-all duration-500 delay-100"></div>
+        
+        {/* Upload Options Container */}
+        <div className="w-full max-w-lg space-y-4">
+          
+          {/* Regular Upload */}
+          <div className="relative group perspective-1000">
+            {/* Floating Decorative Elements */}
+            <div className="absolute -left-12 top-10 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 -rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:-translate-x-4 transition-all duration-500 delay-75"></div>
+            <div className="absolute -right-12 top-20 w-24 h-32 bg-white rounded-lg shadow-xl border border-zinc-100 rotate-12 z-0 opacity-0 group-hover:opacity-100 group-hover:translate-x-4 transition-all duration-500 delay-100"></div>
 
-  {/* 2. The Glow Effect */}
-  <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl blur opacity-20 group-hover:opacity-60 transition duration-500 group-hover:duration-200"></div>
+            {/* Glow Effect */}
+            <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-2xl blur opacity-20 group-hover:opacity-60 transition duration-500 group-hover:duration-200"></div>
 
-  {/* 3. The Main Dropzone Card */}
-  <div className="relative bg-white/90 backdrop-blur-xl border border-zinc-200 p-12 rounded-xl shadow-2xl flex flex-col items-center text-center gap-6 transition-transform duration-300 group-hover:-translate-y-1">
-    
-    {/* Animated Icon */}
-    <div className="relative">
-      <div className="absolute inset-0 bg-indigo-100 rounded-full scale-150 opacity-0 group-hover:scale-125 group-hover:opacity-100 transition-all duration-500"></div>
-      <div className="relative bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 group-hover:border-indigo-100 transition-colors">
-        <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-600 transition-colors duration-300" />
-      </div>
-    </div>
+            {/* Main Upload Card */}
+            <div className="relative bg-white/90 backdrop-blur-xl border border-zinc-200 p-8 rounded-xl shadow-2xl flex flex-col items-center text-center gap-4 transition-transform duration-300 group-hover:-translate-y-1">
+              
+              {/* Animated Icon */}
+              <div className="relative">
+                <div className="absolute inset-0 bg-indigo-100 rounded-full scale-150 opacity-0 group-hover:scale-125 group-hover:opacity-100 transition-all duration-500"></div>
+                <div className="relative bg-white p-4 rounded-2xl shadow-sm border border-zinc-100 group-hover:border-indigo-100 transition-colors">
+                  <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-600 transition-colors duration-300" />
+                </div>
+              </div>
 
-    {/* Text Content */}
-    <div className="space-y-1">
-      <h3 className="text-xl font-bold text-zinc-800 group-hover:text-indigo-600 transition-colors">
-        Drop your assets here
-      </h3>
-      <p className="text-sm font-medium text-zinc-400">
-        Click to upload Image or PDF
-      </p>
-    </div>
+              {/* Text Content */}
+              <div className="space-y-1">
+                <h3 className="text-xl font-bold text-zinc-800 group-hover:text-indigo-600 transition-colors">
+                  Upload Images or PDF
+                </h3>
+                <p className="text-sm font-medium text-zinc-400">
+                  PDFs will be automatically converted to images
+                </p>
+              </div>
 
-    {/* Supported Formats Badge */}
-    <div className="flex gap-2 justify-center mt-2">
-      {["JPG", "PNG", "PDF"].map((fmt) => (
-        <span
-          key={fmt}
-          className="px-2 py-1 bg-zinc-50 border border-zinc-100 rounded text-[10px] font-bold text-zinc-400"
-        >
-          {fmt}
-        </span>
-      ))}
-    </div>
+              {/* Supported Formats */}
+              <div className="flex gap-2 justify-center">
+                {["JPG", "PNG", "PDF", "WEBP"].map((fmt) => (
+                  <span
+                    key={fmt}
+                    className="px-2 py-1 bg-zinc-50 border border-zinc-100 rounded text-[10px] font-bold text-zinc-400"
+                  >
+                    {fmt}
+                  </span>
+                ))}
+              </div>
 
-    {/* 4. The Actual Input (Preserving Logic) */}
-    <input
-      type="file"
-      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
-      onChange={(e) =>
-        e.target.files && onFileUpload(e.target.files[0])
-      }
-    />
-  </div>
-</div>
+              {/* File Input */}
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
+                onChange={(e) => e.target.files && onFileUpload(e.target.files[0], false)}
+              />
+            </div>
+          </div>
+
+          {/* Extract Figures Option */}
+          <div className="relative group">
+            <div className="relative bg-emerald-50 border border-emerald-200 p-6 rounded-xl shadow-lg flex flex-col items-center text-center gap-3 transition-all duration-300 hover:shadow-xl hover:-translate-y-0.5">
+              
+              {/* Icon */}
+              <div className="bg-emerald-100 p-3 rounded-xl">
+                <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+
+              {/* Text */}
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-emerald-800">
+                  Extract Figures from Photo
+                </h3>
+                <p className="text-sm text-emerald-600">
+                  AI will detect and extract individual objects
+                </p>
+              </div>
+
+              {/* File Input */}
+              <input
+                type="file"
+                accept="image/*"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
+                onChange={(e) => e.target.files && onFileUpload(e.target.files[0], true)}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
