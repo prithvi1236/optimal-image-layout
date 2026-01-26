@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { supabase } from '../Components/supabaseClient';
-import { AssetItem } from '../types';
+import type { AssetItem } from '../types';
 import { API_URL } from '../constants';
 
 export const uploadFile = async (
