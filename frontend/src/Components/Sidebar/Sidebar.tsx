@@ -1,8 +1,6 @@
 import React from 'react';
-import { Upload, Layers, Plus } from 'lucide-react';
-import { AssetItem, LayoutItem } from '../../types';
-import PageThumbnails from './PageThumbnails';
-import EmptyState from './EmptyState';
+import { Layers, Plus } from 'lucide-react';
+import type { LayoutItem } from '../../types';
 
 interface SidebarProps {
   hasContent: boolean;
@@ -59,15 +57,39 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {!hasContent ? (
-        <EmptyState />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="text-center text-zinc-400">
+            <Layers size={48} className="mx-auto mb-4 opacity-50" />
+            <p className="text-sm">No images uploaded yet</p>
+            <p className="text-xs mt-1">Upload images or PDFs to get started</p>
+          </div>
+        </div>
       ) : (
-        <PageThumbnails
-          pageCount={pageCount}
-          activePageIndex={activePageIndex}
-          setActivePageIndex={setActivePageIndex}
-          loadingPages={loadingPages}
-          layoutImages={layoutImages}
-        />
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="space-y-2">
+            {Array.from({ length: pageCount }, (_, i) => (
+              <div
+                key={i + 1}
+                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                  activePageIndex === i + 1
+                    ? 'bg-indigo-50 border-indigo-200'
+                    : 'bg-white border-zinc-200 hover:bg-zinc-50'
+                }`}
+                onClick={() => setActivePageIndex(i + 1)}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Page {i + 1}</span>
+                  {loadingPages.has(i + 1) && (
+                    <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                  )}
+                </div>
+                <div className="text-xs text-zinc-500 mt-1">
+                  {layoutImages.filter(img => img.page === i + 1).length} images
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </aside>
   );
