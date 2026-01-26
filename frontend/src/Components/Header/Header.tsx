@@ -111,6 +111,15 @@ const Header: React.FC<HeaderProps> = ({
             <Download size={14} /> Export
           </button>
         )}
+        <div className="ml-2 pl-2 border-l border-zinc-200">
+    <div className="w-9 h-9 rounded-full overflow-hidden border border-zinc-200 shadow-sm">
+      <img 
+        src="/logo.png" 
+        alt="Logo" 
+        className="w-full h-full object-cover" 
+      />
+    </div>
+  </div>
       </div>
     </header>
   );
