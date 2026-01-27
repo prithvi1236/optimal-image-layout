@@ -27,7 +27,14 @@ const Header: React.FC<HeaderProps> = ({
   onDeleteAllData,
 }) => {
   return (
-    <header className="h-14 bg-white border-b border-zinc-200 px-6 flex items-center justify-between z-10 shadow-sm">
+    <header className="
+  bg-white border-b border-zinc-200 px-3 sm:px-6
+  flex flex-wrap sm:flex-nowrap
+  items-center justify-between
+  gap-2 sm:gap-0
+  z-10 shadow-sm
+">
+
       <div className="flex items-center gap-2">
         {sessionRestoring ? (
           <>
@@ -76,7 +83,13 @@ const Header: React.FC<HeaderProps> = ({
         />
       </div>
       
-      <div className="flex gap-2">
+      <div className="
+  flex gap-2
+  self-end sm:self-auto
+  w-full sm:w-auto
+  justify-end
+">
+
         <BuyMeACoffee className="mr-2" />
         <button
           onClick={async () => {
@@ -106,7 +119,10 @@ const Header: React.FC<HeaderProps> = ({
         {hasContent && (
           <button
             onClick={onExportPDF}
-            className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-md"
+            className="bg-zinc-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-zinc-800 shadow-md flex gap-2
+  self-end sm:self-auto
+  w-full sm:w-auto
+  justify-end"
           >
             <Download size={14} /> Export
           </button>
