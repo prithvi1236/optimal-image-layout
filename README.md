@@ -12,12 +12,28 @@ A smart image layout tool that automatically arranges images and PDF extracts in
 - **PDF export**
 - **Automatic cleanup** of inactive user data
 
-  ## 🖥️ UI Screenshots
-  #Landing Page
-  <img width="1920" height="905" alt="Image" src="https://github.com/user-attachments/assets/11ee112a-474c-4fd4-90ab-a6e57bdbb716" />
+## 🖥️ UI Screenshots
 
-  #Layout Editor
-   <img width="1920" height="891" alt="Image" src="https://github.com/user-attachments/assets/d4ce5a7a-81ff-4561-997d-2c114f517baa" />
+### 🔐 Landing Page
+The authentication and onboarding screen where users sign in securely using Google OAuth.
+
+<img
+  src="https://github.com/user-attachments/assets/11ee112a-474c-4fd4-90ab-a6e57bdbb716"
+  alt="Landing Page"
+  width="100%"
+/>
+
+---
+
+### 🧩 Layout Editor
+The main workspace showing smart A4 layout generation, page navigation, and real-time canvas editing.
+
+<img
+  src="https://github.com/user-attachments/assets/d4ce5a7a-81ff-4561-997d-2c114f517baa"
+  alt="Layout Editor"
+  width="100%"
+/>
+
 
 ## 🚀 Quick Setup
 
