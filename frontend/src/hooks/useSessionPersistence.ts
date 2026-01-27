@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback,useRef } from 'react';
 import { supabase } from '../Components/supabaseClient';
 import type { AssetItem, LayoutItem } from '../types';
 import { API_URL } from '../constants';
@@ -11,6 +11,7 @@ export const useSessionPersistence = (
 ) => {
   const [sessionRestoring, setSessionRestoring] = useState(true);
   const [showRecoveryToast, setShowRecoveryToast] = useState(false);
+  const isRestored = useRef(false);
 
   const clearCorruptedData = useCallback(() => {
     localStorage.removeItem('layout-assets');
@@ -101,9 +102,14 @@ export const useSessionPersistence = (
     }
   }, [setAssets, setLayoutImages, setPageCount, generateLayoutStreaming, preloadImages, restoreFromLocalStorage, clearCorruptedData]);
 
-  useEffect(() => {
+  
+
+useEffect(() => {
+  if (!isRestored.current) {
+    isRestored.current = true;
     restoreSession();
-  }, [restoreSession]);
+  }
+}, [restoreSession]);
 
   return {
     sessionRestoring,

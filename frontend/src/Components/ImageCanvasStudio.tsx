@@ -40,6 +40,7 @@ const ImageCanvasStudio: React.FC = () => {
   const mainCanvasRef = useRef<HTMLDivElement>(null);
   const pendingLayoutUpdate = useRef<any>(null);
   const debounceTimeout = useRef<number | null>(null);
+  const [isInternalUpdate, setIsInternalUpdate] = useState(false);
 
   const hasContent = assets.length > 0;
 
@@ -116,6 +117,7 @@ const ImageCanvasStudio: React.FC = () => {
 
   const handleImageUpdate = useCallback(async (imageId: string, updates: Partial<LayoutItem>) => {
     // For immediate visual feedback, update the layout images first
+   setIsInternalUpdate(true);
     setLayoutImages(prev => 
       prev.map(img => 
         img.imageId === imageId ? { ...img, ...updates } : img
@@ -153,6 +155,9 @@ const ImageCanvasStudio: React.FC = () => {
         debounceTimeout.current = window.setTimeout(async () => {
           await generateLayoutStreaming(updatedAssets);
         }, 500);
+      }
+      else{
+        setIsInternalUpdate(false);
       }
     }
   }, [layoutImages, assets, setAssets, setLayoutImages, generateLayoutStreaming]);

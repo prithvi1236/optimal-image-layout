@@ -19,7 +19,7 @@ COPY . .
 RUN mkdir -p uploads output
 
 # Expose port
-EXPOSE 5001
+EXPOSE 5002
 
 # Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5002", "app:app"]

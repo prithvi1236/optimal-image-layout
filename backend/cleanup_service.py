@@ -59,6 +59,26 @@ class CleanupService:
         if self._cleanup_thread:
             self._cleanup_thread.join(timeout=5)
         logger.info("Cleanup scheduler stopped")
+
+    def hard_delete_user_data(self, user_id):
+        """Synchronous permanent deletion for the UI button - No activity table needed"""
+        try:
+            # 1. First, get the list of files to delete from storage
+            res = self.supabase.table("images").select("storage_path").eq("user_id", user_id).execute()
+            paths = [item["storage_path"] for item in res.data]
+
+            # 2. Wipe the physical files from Supabase Storage
+            if paths:
+                self.supabase.storage.from_("assets").remove(paths)
+
+            # 3. Wipe the database rows
+            # This is the final step to ensure no 'ghost' metadata remains
+            self.supabase.table("images").delete().eq("user_id", user_id).execute()
+            
+            print(f"✅ Data for {user_id} has been completely wiped.")
+        except Exception as e:
+            print(f"❌ Error during manual delete: {e}")
+            raise e
     
     def _cleanup_loop(self):
         """Background loop that runs cleanup periodically"""
