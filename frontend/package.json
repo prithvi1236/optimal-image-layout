@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.91.0",
     "@tailwindcss/vite": "^4.1.18",
+    "@vercel/analytics": "^1.6.1",
     "axios": "^1.13.2",
     "framer-motion": "^12.23.26",
     "jspdf": "^4.0.0",

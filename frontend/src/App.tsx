@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Analytics } from '@vercel/analytics/react';
 import ImageCanvasStudio from "./ImageCanvas";
 import Login from "./Components/Login";
 import BuyMeACoffee from "./BuyMeACoffee";
@@ -68,7 +69,7 @@ function App() {
   // --- LOGGED OUT VIEW (Updated: Wider Content, Narrower Visuals) ---
   if (!session) {
     return (
-      <div className="w-screen h-screen flex bg-white overflow-hidden font-sans selection:bg-zinc-900 selection:text-white">
+        <div className="w-screen h-screen flex bg-white overflow-hidden font-sans selection:bg-zinc-900 selection:text-white">
         
         {/* LEFT SIDE: Content (Now Dominant) */}
         <div className="flex-1 h-full flex flex-col relative">
@@ -176,7 +177,9 @@ function App() {
 
   // --- LOGGED IN VIEW ---
   return (
-    <div className="w-screen h-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden">
+    <>
+      <Analytics />
+      <div className="w-screen h-screen bg-zinc-50 text-zinc-900 font-sans overflow-hidden">
       <ImageCanvasStudio />
       
       {showInactivityWarning && (
@@ -209,6 +212,7 @@ function App() {
         </div>
       )}
     </div>
+    </>
   );
 }
 
