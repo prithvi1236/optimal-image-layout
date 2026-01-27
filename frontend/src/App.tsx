@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import ImageCanvasStudio from "./ImageCanvas";
 import Login from "./Components/Login";
+import BuyMeACoffee from "./BuyMeACoffee";
+import GitHubStar from "./GitHubStar";
 import { supabase } from "./Components/supabaseClient";
 import { cleanupService } from "./cleanupService";
 import type { Session } from "@supabase/supabase-js";
@@ -72,10 +74,17 @@ function App() {
         <div className="flex-1 h-full flex flex-col relative">
           
           {/* Header */}
-          <header className="absolute top-0 left-0 w-full p-8 md:p-12 flex items-center gap-2">
-            <img src="/favicon.ico" alt="Gridly Logo" className="w-5 h-5" />
-            <span className="font-bold text-zinc-900 tracking-tight text-lg">Gridly.</span>
+          <header className="absolute top-0 left-0 w-full p-8 md:p-12 flex items-center gap-3">
+            <img
+              src="/favicon.ico"
+              alt="Gridly Logo"
+              className="w-8 h-8"
+            />
+            <span className="font-bold text-zinc-900 tracking-tight text-xl">
+              Gridly.
+            </span>
           </header>
+
 
           {/* Main Centered Content */}
           <main className="flex-1 flex flex-col justify-center items-center px-6 md:px-12">
@@ -94,6 +103,29 @@ function App() {
               {/* Login Container */}
               <div className="w-full">
                 <Login />
+              </div>
+
+              {/* Support Buttons */}
+              <div className="mt-8 flex flex-col sm:flex-row gap-3 w-full justify-center">
+                <BuyMeACoffee className="flex-1 sm:flex-none sm:min-w-[140px]" />
+                <GitHubStar className="flex-1 sm:flex-none sm:min-w-[140px]" />
+              </div>
+
+              {/* Feature Highlights */}
+              <div className="mt-10 grid grid-cols-1 sm:grid-cols-3 gap-4 w-full text-center">
+                <div className="p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                  <div className="text-indigo-600 text-sm font-semibold">Smart AI</div>
+                  <div className="text-xs text-zinc-500 mt-1">Optimal layouts</div>
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                  <div className="text-purple-600 text-sm font-semibold">Images Extract</div>
+                  <div className="text-xs text-zinc-500 mt-1">Auto-detect objects</div>
+                </div>
+                <div className="p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                  <div className="text-emerald-600 text-sm font-semibold">PDF Ready</div>
+                  <div className="text-xs text-zinc-500 mt-1">Export instantly</div>
+                </div>
+  
               </div>
 
               {/* Footer Links */}
@@ -128,7 +160,7 @@ function App() {
                 <img 
                   src="/logo_web.png" 
                   alt="Gridly Logo" 
-                  className="w-32 h-32 xl:w-40 xl:h-40 object-contain"
+                  className="w-70 h-70 xl:w-78 xl:h-78 object-contain"
                 />
              </div>
              <div className="mt-8 text-center space-y-1">
