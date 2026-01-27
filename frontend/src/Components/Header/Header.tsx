@@ -9,7 +9,7 @@ interface HeaderProps {
   loadingPages: Set<number>;
   pageCount: number;
   viewZoom: number;
-  setViewZoom: (zoom: number) => void;
+  setViewZoom: (zoom: number | ((prev: number) => number)) => void;
   hasContent: boolean;
   onExportPDF: () => void;
   onDeleteAllData: () => Promise<void>;
