@@ -6,7 +6,6 @@ import GitHubStar from "./GitHubStar";
 import { supabase } from "./Components/supabaseClient";
 import { cleanupService } from "./cleanupService";
 import type { Session } from "@supabase/supabase-js";
-import logoWeb from "./assets/logo_web.png";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -75,13 +74,13 @@ function App() {
         <div className="flex-1 h-full flex flex-col relative">
           
           {/* Header */}
-          <header className="absolute top-0 left-0 w-full p-8 md:p-12 flex items-center gap-3">
+          <header className="w-full p-8 md:px-12 md:py-10 flex items-center gap-3 bg-white">
             <img
               src="/logo.png"
               alt="Gridly Logo"
-              className="w-10 h-10 "
+              className="w-10 h-10 object-contain"
             />
-            <span className="font-bold text-zinc-900 tracking-tight text-xl">
+            <span className="font-bold text-zinc-900 tracking-tight text-2xl">
               Gridly.
             </span>
           </header>
