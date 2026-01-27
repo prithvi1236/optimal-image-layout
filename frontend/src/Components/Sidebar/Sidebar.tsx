@@ -75,7 +75,18 @@ const Sidebar: React.FC<SidebarProps> = ({
                     ? 'bg-indigo-50 border-indigo-200'
                     : 'bg-white border-zinc-200 hover:bg-zinc-50'
                 }`}
-                onClick={() => setActivePageIndex(i + 1)}
+                onClick={() => {
+  const pageNumber = i + 1;
+  setActivePageIndex(pageNumber);
+
+  document
+    .getElementById(`page-wrapper-${pageNumber}`)
+    ?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+}}
+
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">Page {i + 1}</span>
