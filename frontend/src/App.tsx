@@ -77,9 +77,9 @@ function App() {
           {/* Header */}
           <header className="absolute top-0 left-0 w-full p-8 md:p-12 flex items-center gap-3">
             <img
-              src="/favicon.ico"
+              src="/logo.png"
               alt="Gridly Logo"
-              className="w-8 h-8"
+              className="w-10 h-10 "
             />
             <span className="font-bold text-zinc-900 tracking-tight text-xl">
               Gridly.
@@ -161,7 +161,7 @@ function App() {
                 <img 
                   src="/logo_web.png" 
                   alt="Gridly Logo" 
-                  className="w-70 h-70 xl:w-78 xl:h-78 object-contain"
+                  className="w-100 h-100 xl:w-108 xl:h-108 object-contain"
                 />
              </div>
              <div className="mt-8 text-center space-y-1">

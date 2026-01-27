@@ -83,9 +83,31 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
                   )}
                 </div>
-                <div className="text-xs text-zinc-500 mt-1">
-                  {layoutImages.filter(img => img.page === i + 1).length} images
-                </div>
+                <div className="mt-2 flex items-center gap-3">
+  {/* Mini page preview */}
+  <div className="relative w-[36px] h-[52px] bg-white border border-zinc-200 rounded shadow-sm overflow-hidden">
+    {layoutImages
+      .filter(img => img.page === i + 1)
+      .map((img) => (
+        <img
+          key={img.layoutId}
+          src={img.url}
+          className="absolute object-contain"
+          style={{
+            left: (img.x / 794) * 36,
+            top: (img.y / 1123) * 52,
+            width: (img.width / 794) * 36,
+            height: (img.height / 1123) * 52,
+          }}
+        />
+      ))}
+  </div>
+
+  <span className="text-xs text-zinc-500">
+    {layoutImages.filter(img => img.page === i + 1).length} images
+  </span>
+</div>
+
               </div>
             ))}
           </div>
