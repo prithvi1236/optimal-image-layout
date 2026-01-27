@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../Components/supabaseClient';
-import { AssetItem, LayoutItem } from '../types';
+import type { AssetItem, LayoutItem } from '../types';
 import { API_URL } from '../constants';
 
 export const useImageLayout = () => {

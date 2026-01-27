@@ -22,7 +22,7 @@ MAX_UPLOAD_WORKERS = min(16, CPU_COUNT * 4)  # I/O bound
 MAX_CV2_WORKERS = min(8, CPU_COUNT)  # CPU bound
 
 # --- CORS CONFIGURATION ---
-CORS_ORIGINS = ["http://localhost:5173"]
+CORS_ORIGINS = ["*"]
 CORS_HEADERS = ["Content-Type", "Authorization"]
 
 # Ensure temp directory exists

@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { LayoutItem } from '../types';
+import type { LayoutItem } from '../types';
 import { A4_WIDTH, A4_HEIGHT } from '../constants';
 import { API_URL } from '../constants';
 import { supabase } from '../Components/supabaseClient';

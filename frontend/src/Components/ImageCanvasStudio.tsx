@@ -22,7 +22,6 @@ const ImageCanvasStudio: React.FC = () => {
     loading,
     setLoading,
     loadingPages,
-    setLoadingPages,
     loadedImages,
     setLoadedImages,
     generateLayoutStreaming,
@@ -31,12 +30,11 @@ const ImageCanvasStudio: React.FC = () => {
   const {
     sessionRestoring,
     showRecoveryToast,
-    clearCorruptedData,
   } = useSessionPersistence(setAssets, setLayoutImages, setPageCount, generateLayoutStreaming);
 
   const [viewZoom, setViewZoom] = useState(0.6);
   const [activePageIndex, setActivePageIndex] = useState(1);
-  const [showScaleSavedIndicator, setShowScaleSavedIndicator] = useState(false);
+  const [showScaleSavedIndicator] = useState(false);
   const mainCanvasRef = useRef<HTMLDivElement>(null);
   const pendingLayoutUpdate = useRef<any>(null);
   const debounceTimeout = useRef<number | null>(null);
